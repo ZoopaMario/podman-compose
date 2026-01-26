@@ -1,0 +1,47 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  yamllint:
+    runs-on: ubuntu-latest
+    container: cytopia/yamllint:1.32
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run yamllint
+        run: yamllint -c .yamllint.yaml .
+
+  compose-validate:
+    runs-on: ubuntu-latest
+    container: docker/compose:2.27.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose files
+        run: |
+          set -euo pipefail
+          files=$(find . -name docker-compose.yml -print)
+          for file in $files; do
+            echo "Validating $file"
+            docker compose -f "$file" config --quiet
+          done
+
+  systemd-verify:
+    runs-on: ubuntu-latest
+    container: ghcr.io/systemd/systemd:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify systemd units
+        run: |
+          set -euo pipefail
+          systemd-analyze --version
+          systemd-analyze verify systemd/*.service systemd/*.socket
+
+  env-coverage:
+    runs-on: ubuntu-latest
+    container: python:3.11-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check .env.example coverage
+        run: python scripts/check_env_example_coverage.py
