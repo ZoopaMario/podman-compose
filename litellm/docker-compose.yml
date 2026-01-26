@@ -38,8 +38,6 @@ services:
       DATABASE_URL: "postgresql://${DB_USER:-llmproxy}:${POSTGRES_PASSWORD}@db:5432/litellm?sslmode=disable"
 
       STORE_MODEL_IN_DB: "True"
-      UI_USERNAME: ${UI_USERNAME}
-      UI_PASSWORD: ${UI_PASSWORD}
     depends_on:
       db:
         condition: service_healthy
@@ -50,5 +48,4 @@ volumes:
     external: true
     name: litellm-db-data
 # (No external networks defined; using default network. The litellm service will be accessible on host port 4000,
-# Prometheus on 9091, and Postgres on 5432 for local connections.)
-
+# and Postgres on 5432 for local connections.)

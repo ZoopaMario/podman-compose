@@ -21,8 +21,8 @@ ExecStart=%h/llama.cpp/build/bin/llama-server \
   --ubatch-size 128 \
   --parallel 1 \
   --host 0.0.0.0 \
-  --port 8765
-  --mmap
+  --port 8765 \
+  --mmap \
   --no-mlock
 
 Restart=on-failure
@@ -31,4 +31,3 @@ Nice=-5
 
 [Install]
 WantedBy=default.target
-
