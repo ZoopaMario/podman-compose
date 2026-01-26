@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  homarr:
+    container_name: homarr
+    image: ghcr.io/homarr-labs/homarr:latest
+    restart: unless-stopped
+
+    # Publish Homarr's web UI
+    ports:
+      - "7575:7575"
+
+    # Load secrets (SECRET_ENCRYPTION_KEY) from .env in this directory
+    env_file:
+      - .env
+
+    volumes:
+      # Rootless Podman Docker-compatible socket → inside container as /var/run/docker.sock
+      - /run/user/1000/podman/podman.sock:/var/run/docker.sock
+
+      # Persistent app data on your NFS share
+      - ${DATA_ROOT:-/mnt/data}/homarr/appdata:/appdata
+

@@ -1,0 +1,18 @@
+[Unit]
+Description=Zoopa on-demand stop helper for %i
+
+[Service]
+Type=oneshot
+EnvironmentFile=-%h/.config/zoopa-ondemand/%i.env
+Environment=ZOOPA_STACK_UNIT=%i-stack.service
+ExecStart=/bin/bash -c '\
+  exec 1>&2; \
+  marker="%t/ondemand/%i.started_by_ondemand"; \
+  if [[ -f "$marker" ]]; then \
+    echo "Idle timeout reached. Marker found. Stopping stack ${ZOOPA_STACK_UNIT}..."; \
+    rm -f "$marker"; \
+    systemctl --user stop "${ZOOPA_STACK_UNIT}" || true; \
+  else \
+    echo "Idle timeout reached, but marker not found (manual start?). Leaving stack up."; \
+  fi \
+'

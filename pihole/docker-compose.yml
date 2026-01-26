@@ -1,0 +1,55 @@
+services:
+  unbound:
+    image: klutchell/unbound:main
+    container_name: unbound
+    restart: unless-stopped
+    volumes:
+      # Read-only config + root hints
+      - /mnt/data/pihole/unbound:/etc/unbound/custom.conf.d:ro
+      # Writable state (DNSSEC trust anchor etc.) as a named volume
+      - unbound_state:/var/lib/unbound
+
+  pihole:
+    image: pihole/pihole:latest
+    container_name: pihole
+    depends_on:
+      - unbound
+    ports:
+      - "${BIND_IP}:53:53/tcp"
+      - "${BIND_IP}:53:53/udp"
+      - "${BIND_IP}:50000:80/tcp"
+    environment:
+      TZ: 'Europe/Berlin'
+      PIHOLE_UID: "1000"
+      PIHOLE_GID: "1000"
+
+      WEBPASSWORD: "${PIHOLE_PASSWORD}"
+
+      # Make Pi-hole forward to Unbound (service name + port supported)
+      FTLCONF_dns_upstreams: |-
+        unbound#5335
+
+      # Optional but recommended when Unbound does DNSSEC validation
+      FTLCONF_dns_domainNeeded: true
+
+      FTLCONF_dns_dnssec: 'false'
+      FTLCONF_dns_rateLimit_count: '1000'
+      FTLCONF_dns_rateLimit_interval: '60'
+      FTLCONF_misc_nice: '0'  
+
+      FTLCONF_ntp_ipv4_active: false
+      FTLCONF_ntp_ipv6_active: false
+      FTLCONF_ntp_sync_active: false
+
+    volumes:
+      - ${LOCAL_ROOT:-/srv}/pihole/etc-pihole:/etc/pihole
+      # - ${LOCAL_ROOT:-/srv}/pihole/etc-dnsmasq.d:/etc/dnsmasq.d
+    cap_add:
+      - NET_ADMIN
+      - SYS_NICE
+    shm_size: "256m"
+    restart: unless-stopped
+
+volumes:
+  unbound_state:
+

@@ -1,0 +1,461 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+STACKS_DIR="${BASE_DIR}/stacks"
+LOG_DIR="${BASE_DIR}/logs"
+
+DUPLICATI_CONTAINER="${DUPLICATI_CONTAINER:-duplicati}"
+
+# "run" should enqueue quickly; kill client if it blocks.
+DUPLICATI_RUN_TIMEOUT="${DUPLICATI_RUN_TIMEOUT:-25}"
+
+# Max time to wait for backup completion (seconds). Default: 6h.
+DUPLICATI_WAIT_TIMEOUT="${DUPLICATI_WAIT_TIMEOUT:-21600}"
+
+timestamp() { date '+%F %T'; }
+log() { echo "[$(timestamp)] $*"; }
+die() { log "ERROR: $*"; exit 1; }
+
+usage() {
+  cat <<USAGE
+Usage:
+  backup list
+  backup all
+  backup <stack|unit> [<stack|unit>...]
+
+Examples:
+  backup list
+  backup all
+  backup cryptpad nextcloud
+  backup nextcloud-stack.service vaultwarden
+
+Environment:
+  DUPLICATI_CONTAINER=duplicati
+  DUPLICATI_RUN_TIMEOUT=25
+  DUPLICATI_WAIT_TIMEOUT=21600
+USAGE
+}
+
+normalize_stack_arg() {
+  local a="$1"
+  a="${a##*/}"
+  a="${a%-stack.service}"
+  a="${a%.service}"
+  echo "$a"
+}
+
+list_stacks() {
+  (cd "${STACKS_DIR}" && ls -1 *.sh 2>/dev/null | sed 's/\.sh$//' || true)
+}
+
+DUPLICATI_CMD=(podman exec "${DUPLICATI_CONTAINER}" duplicati-server-util)
+
+require_duplicati() {
+  podman ps --format '{{.Names}}' | grep -qx "${DUPLICATI_CONTAINER}" \
+    || die "Duplicati container '${DUPLICATI_CONTAINER}' is not running."
+
+  "${DUPLICATI_CMD[@]}" list-backups >/dev/null 2>&1 \
+    || die "Cannot talk to Duplicati server-util. Is Duplicati healthy?"
+}
+
+acquire_lock() {
+  local lockfile="${XDG_RUNTIME_DIR:-/tmp}/duplicati-backup.lock"
+  exec 9>"${lockfile}"
+  if ! flock -n 9; then
+    die "Another backup run is already in progress (lock: ${lockfile})."
+  fi
+}
+
+unit_is_active() {
+  local u="$1"
+  systemctl --user is-active --quiet "$u" 2>/dev/null
+}
+
+unit_stop_best_effort() {
+  local u="$1"
+  systemctl --user stop "$u" >/dev/null 2>&1 || true
+}
+
+unit_start_best_effort() {
+  local u="$1"
+  systemctl --user start "$u" >/dev/null 2>&1 || true
+}
+
+wait_stopped() {
+  local project="$1"
+  local timeout="${2:-120}"
+  local start now
+  start="$(date +%s)"
+  while true; do
+    if ! podman ps --filter "label=io.podman.compose.project=${project}" --format '{{.ID}}' | grep -q .; then
+      return 0
+    fi
+    now="$(date +%s)"
+    if (( now - start > timeout )); then
+      return 1
+    fi
+    sleep 2
+  done
+}
+
+wait_started() {
+  local project="$1"
+  local timeout="${2:-120}"
+  local start now
+  start="$(date +%s)"
+  while true; do
+    if podman ps --filter "label=io.podman.compose.project=${project}" --format '{{.ID}}' | grep -q .; then
+      return 0
+    fi
+    now="$(date +%s)"
+    if (( now - start > timeout )); then
+      return 1
+    fi
+    sleep 2
+  done
+}
+
+supports_run_wait() {
+  "${DUPLICATI_CMD[@]}" run --help 2>&1 | grep -q -- '--wait'
+}
+
+extract_id_from_run_output() {
+  sed -n 's/.*(ID: \([0-9][0-9]*\)).*/\1/p' | tail -n1
+}
+
+get_backup_id_by_name() {
+  local name="$1"
+  "${DUPLICATI_CMD[@]}" list-backups 2>/dev/null \
+    | grep -F "${name}" \
+    | sed -n 's/.*ID[:= ]\{0,2\}\([0-9][0-9]*\).*/\1/p' \
+    | head -n1
+}
+
+duplicati_status() {
+  "${DUPLICATI_CMD[@]}" status 2>/dev/null || true
+}
+
+active_task_value() {
+  local s="$1"
+  echo "$s" | awk -F': ' '/^Active task:/{print $2; exit}'
+}
+
+status_is_idle() {
+  local s="$1"
+  local active
+  active="$(active_task_value "$s" || true)"
+
+  if [[ -n "${active}" ]]; then
+    shopt -s nocasematch
+    if [[ "${active}" == "none" || "${active}" == "empty" ]]; then
+      shopt -u nocasematch
+      return 0
+    fi
+    shopt -u nocasematch
+    return 1
+  fi
+
+  echo "$s" | grep -qiE 'no active|idle|nothing running|no tasks|not running'
+}
+
+status_has_active_task() {
+  local s="$1"
+  local active
+  active="$(active_task_value "$s" || true)"
+  [[ -n "${active}" ]] || return 1
+  shopt -s nocasematch
+  if [[ "${active}" == "none" || "${active}" == "empty" ]]; then
+    shopt -u nocasematch
+    return 1
+  fi
+  shopt -u nocasematch
+  return 0
+}
+
+wait_for_backup_done() {
+  local id="$1"
+  local timeout="${2:-$DUPLICATI_WAIT_TIMEOUT}"
+  local start now
+  local last_print=0
+
+  start="$(date +%s)"
+  while true; do
+    local s
+    s="$(duplicati_status)"
+
+    if status_is_idle "$s"; then
+      return 0
+    fi
+
+    if status_has_active_task "$s"; then
+      :
+    else
+      # Unknown format: if it doesn't claim idle and doesn't show active, assume done.
+      return 0
+    fi
+
+    now="$(date +%s)"
+    if (( now - start > timeout )); then
+      log "Timed out waiting for backup completion. Last status snippet:"
+      echo "$s" | sed -n '1,120p'
+      return 1
+    fi
+
+    if (( now - last_print >= 60 )); then
+      log "Waiting… (backup id=${id})"
+      last_print="$now"
+    fi
+
+    sleep 5
+  done
+}
+
+run_job_and_wait() {
+  local job="$1"
+  local out rc id=""
+
+  log "Running Duplicati job: ${job}"
+
+  if supports_run_wait; then
+    log "Using server-util --wait"
+    timeout "${DUPLICATI_WAIT_TIMEOUT}" "${DUPLICATI_CMD[@]}" run "${job}" --wait
+    return 0
+  fi
+
+  set +e
+  out="$(timeout "${DUPLICATI_RUN_TIMEOUT}" "${DUPLICATI_CMD[@]}" run "${job}" 2>&1)"
+  rc=$?
+  set -e
+  printf '%s\n' "$out"
+
+  if [[ $rc -eq 124 ]]; then
+    log "NOTE: 'run' exceeded ${DUPLICATI_RUN_TIMEOUT}s; switching to status polling."
+  elif [[ $rc -ne 0 ]]; then
+    log "WARNING: 'run' exited rc=${rc}; switching to status polling anyway."
+  fi
+
+  id="$(echo "$out" | extract_id_from_run_output)"
+  if [[ -z "$id" ]]; then
+    id="$(get_backup_id_by_name "$job" || true)"
+  fi
+  if [[ -z "$id" ]]; then
+    id="0"
+    log "WARNING: Could not determine backup ID for '${job}'. Waiting until Active task becomes None."
+  else
+    log "Waiting for backup ID ${id} to finish..."
+  fi
+
+  if ! wait_for_backup_done "$id" "${DUPLICATI_WAIT_TIMEOUT}"; then
+    die "Timed out waiting for backup '${job}' (id=${id}) to finish"
+  fi
+}
+
+load_stack() {
+  local stack="$1"
+  local file="${STACKS_DIR}/${stack}.sh"
+  [[ -f "${file}" ]] || die "No stack config: ${file}"
+
+  STACK_NAME=""
+  UNIT=""
+  PROJECT_LABEL=""
+  STOP_TIMEOUT=180
+  START_TIMEOUT=180
+  DUPLICATI_JOBS=()
+
+  # New (optional): restore policy + ondemand freezing
+  # RESTORE_POLICY:
+  #   - "previous" (default): restore the unit only if it was active before backup
+  #   - "always"           : always start unit after backup
+  RESTORE_POLICY="previous"
+
+  # If set + FREEZE_ONDEMAND="yes", we stop these to prevent surprise activation mid-backup.
+  ONDEMAND_SOCKET=""
+  ONDEMAND_SERVICE=""
+  FREEZE_ONDEMAND="no"
+
+  stack_pre_stop()  { :; }
+  stack_post_stop() { :; }
+  stack_pre_backup(){ :; }
+  stack_post_backup(){ :; }
+  stack_pre_start() { :; }
+  stack_post_start(){ :; }
+  stack_verify()    { :; }
+
+  # shellcheck source=/dev/null
+  source "${file}"
+
+  [[ -n "${STACK_NAME}" ]] || STACK_NAME="${stack}"
+  [[ -n "${UNIT}" ]] || UNIT="${stack}-stack.service"
+  [[ -n "${PROJECT_LABEL}" ]] || PROJECT_LABEL="${stack}"
+
+  if [[ "${#DUPLICATI_JOBS[@]}" -eq 0 ]]; then
+    die "Stack '${stack}' has no DUPLICATI_JOBS configured."
+  fi
+
+  case "${RESTORE_POLICY}" in
+    previous|always) ;;
+    *) die "Invalid RESTORE_POLICY='${RESTORE_POLICY}' for stack '${stack}' (use previous|always)" ;;
+  esac
+}
+
+do_one_stack_backup() {
+  local stack="$1"
+  load_stack "${stack}"
+
+  log "=============================="
+  log "Stack: ${STACK_NAME}"
+  log "Unit : ${UNIT}"
+  log "Label: io.podman.compose.project=${PROJECT_LABEL}"
+  log "Jobs : ${DUPLICATI_JOBS[*]}"
+  log "Restore policy: ${RESTORE_POLICY}"
+  if [[ "${FREEZE_ONDEMAND}" == "yes" && -n "${ONDEMAND_SOCKET}" ]]; then
+    log "On-demand freeze: yes (${ONDEMAND_SOCKET} ${ONDEMAND_SERVICE:+/ ${ONDEMAND_SERVICE}})"
+  else
+    log "On-demand freeze: no"
+  fi
+  log "=============================="
+
+  # trigger autofs
+  ls /mnt/backup >/dev/null 2>&1 || true
+
+  # Capture prior state
+  local unit_was_active="no"
+  local ondemand_socket_was_active="no"
+
+  if unit_is_active "${UNIT}"; then
+    unit_was_active="yes"
+  fi
+
+  if [[ "${FREEZE_ONDEMAND}" == "yes" && -n "${ONDEMAND_SOCKET}" ]]; then
+    if unit_is_active "${ONDEMAND_SOCKET}"; then
+      ondemand_socket_was_active="yes"
+    fi
+  fi
+
+  local started_again="no"
+  local ondemand_restored="no"
+
+  cleanup() {
+    # Restore on-demand socket if we froze it and it used to be active
+    if [[ "${FREEZE_ONDEMAND}" == "yes" && -n "${ONDEMAND_SOCKET}" && "${ondemand_socket_was_active}" == "yes" && "${ondemand_restored}" != "yes" ]]; then
+      log "Cleanup: restoring on-demand socket '${ONDEMAND_SOCKET}' (best-effort)"
+      unit_start_best_effort "${ONDEMAND_SOCKET}"
+    fi
+
+    # Restore stack only if policy demands it
+    if [[ "${started_again}" != "yes" ]]; then
+      if [[ "${RESTORE_POLICY}" == "always" || "${unit_was_active}" == "yes" ]]; then
+        log "Cleanup: attempting to start '${UNIT}' (best-effort)"
+        unit_start_best_effort "${UNIT}"
+      else
+        log "Cleanup: leaving '${UNIT}' stopped (it was inactive before backup)"
+      fi
+    fi
+  }
+  trap cleanup EXIT
+
+  # Optional freeze: prevent socket activation mid-backup
+  if [[ "${FREEZE_ONDEMAND}" == "yes" && -n "${ONDEMAND_SOCKET}" ]]; then
+    log "Freezing on-demand activation: stopping '${ONDEMAND_SOCKET}'"
+    unit_stop_best_effort "${ONDEMAND_SOCKET}"
+
+    if [[ -n "${ONDEMAND_SERVICE}" ]]; then
+      log "Stopping on-demand proxyd service (best-effort): '${ONDEMAND_SERVICE}'"
+      unit_stop_best_effort "${ONDEMAND_SERVICE}"
+    fi
+  fi
+
+  stack_pre_stop
+  log "Stopping unit: ${UNIT}"
+  systemctl --user stop "${UNIT}"
+
+  if ! wait_stopped "${PROJECT_LABEL}" "${STOP_TIMEOUT}"; then
+    log "WARNING: Containers for '${PROJECT_LABEL}' still appear running after ${STOP_TIMEOUT}s."
+    log "Continuing anyway (consistency may be reduced)."
+  fi
+  stack_post_stop
+
+  stack_pre_backup
+  for job in "${DUPLICATI_JOBS[@]}"; do
+    run_job_and_wait "${job}"
+  done
+  stack_post_backup
+
+  # Restore the stack according to policy
+  stack_pre_start
+  if [[ "${RESTORE_POLICY}" == "always" || "${unit_was_active}" == "yes" ]]; then
+    log "Starting unit: ${UNIT} (restore policy=${RESTORE_POLICY}, was_active=${unit_was_active})"
+    systemctl --user start "${UNIT}"
+
+    if ! wait_started "${PROJECT_LABEL}" "${START_TIMEOUT}"; then
+      log "WARNING: No running containers detected for '${PROJECT_LABEL}' after ${START_TIMEOUT}s."
+    fi
+  else
+    log "Leaving unit stopped: ${UNIT} (it was inactive before backup)"
+  fi
+  stack_post_start
+
+  # Un-freeze on-demand socket if it used to be active
+  if [[ "${FREEZE_ONDEMAND}" == "yes" && -n "${ONDEMAND_SOCKET}" && "${ondemand_socket_was_active}" == "yes" ]]; then
+    log "Restoring on-demand socket: starting '${ONDEMAND_SOCKET}'"
+    unit_start_best_effort "${ONDEMAND_SOCKET}"
+    ondemand_restored="yes"
+  fi
+
+  stack_verify
+
+  started_again="yes"
+  trap - EXIT
+  log "DONE: ${STACK_NAME}"
+}
+
+backup_one_stack() {
+  local stack="$1"
+  local logfile="${LOG_DIR}/backup-${stack}-$(date +%F).log"
+  mkdir -p "${LOG_DIR}"
+
+  (
+    set -euo pipefail
+    do_one_stack_backup "${stack}"
+  ) 2>&1 | tee -a "${logfile}"
+}
+
+main() {
+  acquire_lock
+
+  [[ $# -ge 1 ]] || { usage; exit 1; }
+
+  local cmd="$1"; shift || true
+
+  case "${cmd}" in
+    list)
+      list_stacks
+      ;;
+    all)
+      require_duplicati
+      mapfile -t stacks < <(list_stacks)
+      [[ "${#stacks[@]}" -gt 0 ]] || die "No stack configs found in ${STACKS_DIR}"
+      for s in "${stacks[@]}"; do
+        backup_one_stack "${s}"
+      done
+      ;;
+    -h|--help|help)
+      usage
+      ;;
+    *)
+      require_duplicati
+      local args=("${cmd}" "$@")
+      local stacks=()
+      for a in "${args[@]}"; do
+        stacks+=("$(normalize_stack_arg "$a")")
+      done
+      for s in "${stacks[@]}"; do
+        backup_one_stack "${s}"
+      done
+      ;;
+  esac
+}
+
+main "$@"
+

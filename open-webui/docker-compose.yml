@@ -1,0 +1,117 @@
+version: '3.9'
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    networks: [owui]
+    # SECURITY NOTE: In a rootless Podman environment, "0" maps to the unprivileged
+    # host user. If running in rootful Docker, change this to your PUID:PGID.
+    user: "0"                                # run as root inside container
+    environment:
+      POSTGRES_USER: ${DB_USER:-openwebui}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: openwebui
+      TZ: Europe/Berlin
+    shm_size: "512m"
+    command: >
+      postgres -c shared_buffers=512MB
+               -c work_mem=16MB
+               -c maintenance_work_mem=256MB
+               -c effective_cache_size=2048MB
+               -c max_connections=200
+               -c wal_level=replica
+               -c max_wal_size=2GB
+               -c checkpoint_timeout=10min
+               -c autovacuum=on
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openwebui -d openwebui"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    volumes:
+      - owui-postgres-data:/var/lib/postgresql/data
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.3
+    restart: unless-stopped
+    networks: [owui]
+    # SECURITY NOTE: In a rootless Podman environment, "0" maps to the unprivileged
+    # host user. If running in rootful Docker, change this to your PUID:PGID.
+    user: "0"                                # ensure container root=orangepi on host
+    environment:
+      QDRANT__LOG_LEVEL: INFO
+      QDRANT__STORAGE__STORAGE_PATH: /qdrant/storage
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    volumes:
+      - ${DATA_ROOT:-/mnt/data}/open-webui/qdrant:/qdrant/storage
+
+  valkey:
+    image: valkey/valkey:8.0.2-alpine
+    restart: unless-stopped
+    networks: [owui]
+    command: >
+      valkey-server --appendonly no --save ""
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main-slim
+    restart: unless-stopped
+    networks: [owui]
+    environment:
+      TZ: Europe/Berlin
+      DEFAULT_LOCALE: "de-DE"
+      ENV: prod
+      UVICORN_WORKERS: "1"
+      THREAD_POOL_SIZE: "64"
+      MODELS_CACHE_TTL: "300"
+      CHAT_RESPONSE_STREAM_DELTA_CHUNK_SIZE: "12"
+      ENABLE_REALTIME_CHAT_SAVE: "false"
+      DATABASE_URL: postgresql://${DB_USER:-openwebui}:${POSTGRES_PASSWORD}@postgres:5432/openwebui
+      DATABASE_POOL_SIZE: "10"
+      DATABASE_POOL_MAX_OVERFLOW: "20"
+      DATABASE_POOL_TIMEOUT: "30"
+      DATABASE_POOL_RECYCLE: "1800"
+      ENABLE_WEBSOCKET_SUPPORT: "true"
+      WEBSOCKET_MANAGER: "redis"
+      REDIS_URL: redis://valkey:6379/0
+      WEBSOCKET_REDIS_URL: redis://valkey:6379/1
+      REDIS_KEY_PREFIX: open-webui
+      VECTOR_DB: qdrant
+      QDRANT_URI: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
+    ports:
+      - "${OPEN_WEBUI_PORT:-8080}:8080"
+    volumes:
+      - ${DATA_ROOT:-/mnt/data}/open-webui/owui:/app/backend/data
+
+  mcpo:
+    image: ghcr.io/open-webui/mcpo:main
+    restart: unless-stopped
+    networks: [owui]
+    environment:
+      TZ: Europe/Berlin
+      MCPO_API_KEY: ${MCPO_API_KEY}
+    volumes:
+      - ${DATA_ROOT:-/mnt/data}/open-webui/mcpo:/config
+    command: >
+      --port 8000
+      --api-key ${MCPO_API_KEY}
+      --config /config/mcpo-config.json
+    ports:
+      - "${MCPO_PORT:-8000}:8000"
+
+networks:
+  owui:
+    driver: bridge
+
+volumes:
+  owui-postgres-data:
+

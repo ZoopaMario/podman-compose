@@ -1,0 +1,14 @@
+[Unit]
+Description=Jellyfin stack (rootless podman-compose)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/podman-compose/jellyfin
+ExecStart=/usr/bin/podman-compose up -d
+ExecStop=/usr/bin/podman-compose down
+RemainAfterExit=yes
+
+[Install]
+WantedBy=default.target

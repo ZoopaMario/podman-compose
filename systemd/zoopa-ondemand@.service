@@ -1,0 +1,39 @@
+[Unit]
+Description=Zoopa on-demand proxy for %i
+OnSuccess=zoopa-ondemand-stop@%i.service
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.config/zoopa-ondemand/%i.env
+Environment=ZOOPA_STACK_UNIT=%i-stack.service
+Environment=ZOOPA_IDLE_TIMEOUT=600
+
+# Critical: Redirect stdout to stderr (>&2) so we don't corrupt the socket connection
+ExecStart=/bin/bash -c '\
+  exec 1>&2; \
+  set -euo pipefail; \
+  echo "Triggered for %i. Checking config..."; \
+  : "${ZOOPA_UPSTREAM:?Set ZOOPA_UPSTREAM in %h/.config/zoopa-ondemand/%i.env}"; \
+  rt="%t/ondemand"; \
+  marker="$rt/%i.started_by_ondemand"; \
+  \
+  if ! systemctl --user is-active --quiet "${ZOOPA_STACK_UNIT}"; then \
+    echo "Stack ${ZOOPA_STACK_UNIT} is down. Starting..."; \
+    systemctl --user start "${ZOOPA_STACK_UNIT}"; \
+    touch "$marker"; \
+  else \
+    echo "Stack ${ZOOPA_STACK_UNIT} is already up."; \
+  fi; \
+  \
+  echo "Proxying to ${ZOOPA_UPSTREAM} with timeout ${ZOOPA_IDLE_TIMEOUT}s..."; \
+  exec /usr/lib/systemd/systemd-socket-proxyd --exit-idle-time="${ZOOPA_IDLE_TIMEOUT}s" "${ZOOPA_UPSTREAM}" \
+'
+
+Restart=on-failure
+RestartSec=1s
+StartLimitIntervalSec=0
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=default.target

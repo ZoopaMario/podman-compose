@@ -1,0 +1,84 @@
+version: "3"
+
+volumes:
+  mysql_data:
+  romm_redis_data:
+
+services:
+  romm:
+    image: rommapp/romm:4
+    container_name: romm
+    restart: unless-stopped
+
+    environment:
+      # DB connection
+      - DB_HOST=romm-db
+      - DB_NAME=romm            # Should match MYSQL_DATABASE in romm-db
+      - DB_USER=${DB_USER:-romm-user}
+      - DB_PASSWD=${MYSQL_PASSWORD}
+
+      # Auth / secrets (all should be defined in .env)
+      - ROMM_AUTH_SECRET_KEY=${ROMM_AUTH_SECRET_KEY}
+
+      # Metadata providers (optional but recommended)
+      - IGDB_CLIENT_ID=${IGDB_CLIENT_ID}
+      - IGDB_CLIENT_SECRET=${IGDB_CLIENT_SECRET}
+      - MOBYGAMES_API_KEY=${MOBYGAMES_API_KEY}
+      - STEAMGRIDDB_API_KEY=${STEAMGRIDDB_API_KEY}
+      # You can also add, if you use them:
+      # - SCREENSCRAPER_USER=${SCREENSCRAPER_USER}
+      # - SCREENSCRAPER_PASSWORD=${SCREENSCRAPER_PASSWORD}
+      # - RETROACHIEVEMENTS_API_KEY=${RETROACHIEVEMENTS_API_KEY}
+      # - HASHEOUS_API_ENABLED=${HASHEOUS_API_ENABLED}
+      # - PLAYMATCH_API_ENABLED=${PLAYMATCH_API_ENABLED}
+      # - LAUNCHBOX_API_ENABLED=${LAUNCHBOX_API_ENABLED}
+
+      - TZ=Europe/Berlin
+
+    volumes:
+      # Redis cache (local Podman volume, not NFS – fine if lost)
+      - romm_redis_data:/redis-data
+
+      # NFS-backed data
+      - ${DATA_ROOT:-/mnt/data}/MEDIA/emulation:/romm/library:rw    # ROMs
+      - ${DATA_ROOT:-/mnt/data}/romm/resources:/romm/resources:rw   # Covers, screenshots, metadata
+      - ${DATA_ROOT:-/mnt/data}/romm/assets:/romm/assets:rw         # Saves, states, etc.
+      - ${DATA_ROOT:-/mnt/data}/romm/config:/romm/config:rw         # config.yml, etc.
+
+    ports:
+      - "${ROMM_PORT:-8080}:8080"
+
+    depends_on:
+      romm-db:
+        condition: service_started
+        # podman-compose currently ignores service_healthy semantics,
+        # so we just use it as a simple start-order hint.
+
+  romm-db:
+    image: docker.io/library/mariadb:11.4
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}   # from .env
+      - MYSQL_DATABASE=romm
+      - MYSQL_USER=romm-user
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - TZ=Europe/Berlin
+
+    volumes:
+      # Local Podman volume – avoids NFS + user-namespace headaches for MariaDB
+      - mysql_data:/var/lib/mysql
+
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+      # IMPORTANT: no start_interval – Podman/buildah don't support it yet
+      # and you'll get errors like “can't set healthcheck.start_interval
+      # as feature require Docker Engine v25 or later”. :contentReference[oaicite:2]{index=2}
+

@@ -1,0 +1,54 @@
+version: "3.8"
+
+services:
+  cryptpad:
+    image: "cryptpad/cryptpad:version-2025.9.0"
+    container_name: cryptpad
+    hostname: cryptpad
+
+    environment:
+      - HOME=/cryptpad
+      - CPAD_MAIN_DOMAIN=https://drive.${CPAD_DOMAIN}
+      - CPAD_SANDBOX_DOMAIN=https://sandbox-drive.${CPAD_DOMAIN}
+      - CPAD_CONF=/cryptpad/config/config.js
+        #- CPAD_INSTALL_ONLYOFFICE=yes
+
+    # Rootless-safe mode: container "root" maps to the host user (orangepi).
+    # This is the model that reliably works with NFS bind mounts under rootless Podman.
+    # SECURITY NOTE: In a rootless Podman environment, "0" maps to the unprivileged
+    # host user. If running in rootful Docker, change this to your PUID:PGID.
+    user: "0:0"
+
+    volumes:
+      - ${DATA_ROOT:-/mnt/data}/cryptpad/blob:/cryptpad/blob
+      - ${DATA_ROOT:-/mnt/data}/cryptpad/block:/cryptpad/block
+      - ${DATA_ROOT:-/mnt/data}/cryptpad/customize:/cryptpad/customize
+      - ${DATA_ROOT:-/mnt/data}/cryptpad/data:/cryptpad/data
+      - ${DATA_ROOT:-/mnt/data}/cryptpad/datastore:/cryptpad/datastore
+
+      # OnlyOffice persistence
+      - ${DATA_ROOT:-/mnt/data}/cryptpad/onlyoffice-dist:/cryptpad/www/common/onlyoffice/dist
+      - ${DATA_ROOT:-/mnt/data}/cryptpad/onlyoffice-conf:/cryptpad/onlyoffice-conf
+
+      # Config is read-only
+      - ${DATA_ROOT:-/mnt/data}/cryptpad/config/config.js:/cryptpad/config/config.js:ro
+
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3003:3003"
+
+    ulimits:
+      nofile:
+        soft: 1000000
+        hard: 1000000
+      nproc: 65535
+
+    restart: unless-stopped
+
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true
+

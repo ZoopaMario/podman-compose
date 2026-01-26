@@ -1,0 +1,17 @@
+[Unit]
+Description=Zoopa on-demand socket for %i (nginx -> unix socket -> systemd socket activation)
+Requires=zoopa-ondemand-dir.service
+After=zoopa-ondemand-dir.service
+
+[Socket]
+ListenStream=%t/ondemand/%i.sock
+
+DirectoryMode=0711
+SocketMode=0666
+
+RemoveOnStop=yes
+Accept=no
+
+[Install]
+WantedBy=sockets.target
+

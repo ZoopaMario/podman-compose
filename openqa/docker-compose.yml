@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: openqa-postgres
+    environment:
+      POSTGRES_DB: openqa
+      POSTGRES_USER: ${DB_USER:-geekotest}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - ${DATA_PATH}/postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks:
+      - openqa
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geekotest"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  openqa-webui:
+    image: registry.opensuse.org/devel/openqa/containers15.6/openqa_webui:latest
+    container_name: openqa-webui
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${WEBUI_PORT:-8555}:80"
+      - "${WEBUI_HTTPS_PORT:-8444}:443"
+    volumes:
+      - ${DATA_PATH}/openqa:/var/lib/openqa
+      - ${CONFIG_PATH}/openqa.ini:/data/conf/openqa.ini:z
+      - ${CONFIG_PATH}/database.ini:/data/conf/database.ini:z
+    environment:
+      - OPENQA_HOST=openqa-webui
+    restart: unless-stopped
+    networks:
+      - openqa
+
+  openqa-worker:
+    image: registry.opensuse.org/devel/openqa/containers15.6/openqa_worker:latest
+    container_name: openqa-worker
+    depends_on:
+      - openqa-webui
+    devices:
+      - /dev/kvm:/dev/kvm
+    volumes:
+      - ${DATA_PATH}/openqa:/var/lib/openqa
+      - ${CONFIG_PATH}/workers.ini:/data/conf/workers.ini:z
+      - ${CONFIG_PATH}/client.conf:/data/conf/client.conf:z
+    environment:
+      - OPENQA_HOST=openqa-webui
+    restart: unless-stopped
+    networks:
+      - openqa
+
+networks:
+  openqa:
+    driver: bridge
+

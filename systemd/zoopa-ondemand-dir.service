@@ -1,0 +1,11 @@
+[Unit]
+Description=Zoopa on-demand sockets directory
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/mkdir -p %t/ondemand
+ExecStart=/usr/bin/chmod 0711 %t/ondemand
+
+[Install]
+WantedBy=default.target
+

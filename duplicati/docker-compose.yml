@@ -1,0 +1,37 @@
+services:
+  duplicati:
+    image: duplicati/duplicati:stable
+    container_name: duplicati
+    restart: on-failure
+
+    # If this works with your podman-compose, it's safest (localhost only).
+    # If it doesn't, switch to "8200:8200" and restrict via nginx/firewall.
+    ports:
+      - "8200:8200"
+
+    # Environment
+    env_file:
+      - .env
+
+    environment:
+      - TZ=Europe/Berlin
+
+    volumes:
+      # Duplicati state (local disk recommended to avoid sqlite-on-NFS weirdness)
+      - ${LOCAL_ROOT:-/srv}/duplicati/data:/data
+
+      # NFS data sources
+      - ${DATA_ROOT:-/mnt/data}:${DATA_ROOT:-/mnt/data}:ro
+
+      # backup destination (fresh folder you already created under this)
+      - /mnt/backup:/mnt/backup
+
+      # Rootless podman named volumes (DBs you kept off NFS, etc.)
+      - ${HOST_HOME}/.local/share/containers/storage/volumes:/podman-volumes:ro
+
+      # Optional: podman socket (we’ll use it in the “advanced” option below)
+      - /run/user/1000/podman/podman.sock:/run/podman/podman.sock
+
+      # Optional: scripts (if you later want Duplicati run-scripts)
+      - ${LOCAL_ROOT:-/srv}/duplicati/scripts:/scripts:ro
+

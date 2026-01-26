@@ -1,0 +1,33 @@
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:10
+    container_name: jellyfin
+    ports:
+      - "8096:8096"        # HTTP
+      - "8920:8920"        # HTTPS (if you use it)
+      - "7359:7359/udp"    # Client discovery
+      - "1900:1900/udp"    # DLNA (SSDP)
+
+#    user: "1000:1000"
+
+    # Persistent config + cache on NFS, media bind-mounted read/write.
+    volumes:
+      - ${LOCAL_ROOT:-/srv}/jellyfin/config:/config
+      - ${LOCAL_ROOT:-/srv}/jellyfin/cache:/cache
+      - type: bind
+        source: ${DATA_ROOT:-/mnt/data}/MEDIA
+        target: /media
+        read_only: false
+
+    restart: on-failure
+
+    # Optional: uncomment if you want Jellyfin to advertise a custom URL
+    # environment:
+    #   - JELLYFIN_PublishedServerUrl=https://jellyfin.yourdomain.tld
+
+    # Docker-specific host-gateway alias is not needed / not supported in Podman.
+    # Podman has host.containers.internal for bridge mode, but with host network
+    # the container is effectively "on the host" already, so we can drop this.
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+

@@ -1,0 +1,44 @@
+[Unit]
+Description=Nextcloud AppAPI HaRP (rootless Docker)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# Make sure docker CLI talks to the rootless daemon
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=DOCKER_HOST=unix:///run/user/%U/docker.sock
+
+# Load HP_SHARED_KEY from the same .env as Nextcloud
+EnvironmentFile=%h/podman-compose/nextcloud/.env
+
+# Idempotent start: create container if missing, otherwise just start it
+ExecStart=/usr/bin/bash -lc '\
+  if ! docker ps -a --format "{{.Names}}" | grep -q "^appapi-harp$"; then \
+    docker run \
+      --name appapi-harp -h appapi-harp \
+      --restart unless-stopped \
+      --network proxy \
+      -e NC_INSTANCE_URL="https://${NC_DOMAIN}" \
+      -e HP_SHARED_KEY="${HP_SHARED_KEY}" \
+      -e HP_LOG_LEVEL="info" \
+      -e HP_VERBOSE_START="1" \
+      -e HP_EXAPPS_ADDRESS="0.0.0.0:8780" \
+      -e HP_FRP_ADDRESS="0.0.0.0:8782" \
+      -v "$XDG_RUNTIME_DIR/docker.sock":/var/run/docker.sock \
+      -v /mnt/data/nextcloud/harp-certs:/certs \
+      -p 127.0.0.1:8780:8780 \
+      -p 0.0.0.0:8782:8782 \
+      -d ghcr.io/nextcloud/nextcloud-appapi-harp:release; \
+  else \
+    docker start appapi-harp; \
+  fi'
+
+ExecStop=/usr/bin/bash -lc 'docker stop appapi-harp || true'
+ExecStopPost=/usr/bin/bash -lc 'docker rm appapi-harp || true'
+
+[Install]
+WantedBy=default.target
+

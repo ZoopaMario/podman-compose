@@ -1,0 +1,42 @@
+services:
+  shlink:
+    image: shlinkio/shlink:stable
+    container_name: my_shlink
+    restart: unless-stopped
+    depends_on:
+      - db
+    ports:
+      - "${SHLINK_PORT:-8080}:8080"
+    env_file:
+      - .env
+    environment:
+      # Shlink core settings
+      DEFAULT_DOMAIN: "${DEFAULT_DOMAIN}"
+      IS_HTTPS_ENABLED: "${IS_HTTPS_ENABLED}"
+      GEOLITE_LICENSE_KEY: "${GEOLITE_LICENSE_KEY}"
+
+      # Database settings – use external MySQL
+      DB_DRIVER: "mysql"
+      DB_HOST: "my_shlink_db"
+      DB_USER: "${DB_USER:-shlink_user}"
+      DB_PASSWORD: "${MYSQL_PASSWORD}"
+      DB_NAME: "shlink_db"
+
+  db:
+    image: lscr.io/linuxserver/mariadb:latest
+    container_name: my_shlink_db
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PUID: "1000"            # uid of orangepi on koopa-crypt
+      PGID: "100"
+
+      TZ: "Europe/Berlin"
+      
+      MYSQL_DATABASE: "shlink_db"
+      MYSQL_USER: "${DB_USER:-shlink_user}"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD}"
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
+    volumes:
+      - ${DATA_ROOT:-/mnt/data}/shlink/db:/var/lib/mysql

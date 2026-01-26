@@ -1,0 +1,49 @@
+version: "3.8"
+
+networks:
+  frontend:
+    name: proxy
+    external: true
+
+services:
+  collabora:
+    image: docker.io/collabora/code:latest
+    container_name: collabora
+    restart: unless-stopped
+
+    expose:
+      - "9980"
+
+    networks:
+      - frontend
+
+    environment:
+      # Admin UI login for /browser/dist/admin/admin.html
+      - username=${COLLABORA_ADMIN_USER}
+      - password=${COLLABORA_ADMIN_PASS}
+
+      # Allow only your Nextcloud as a WOPI host
+      # 'domain' is a regex (escape dots)
+      - domain=${COLLABORA_DOMAIN_REGEX}
+      # You terminate TLS at nginx, so disable TLS in container and tell it about termination
+      - extra_params=--o:ssl.enable=false --o:ssl.termination=true
+
+      # Optional but recommended: don’t generate a self-signed cert in the container
+      - DONT_GEN_SSL_CERT=1
+
+    # Conservative resource defaults (adjust later if needed)
+    shm_size: "1g"
+
+    # Keep privileges tight (still rootless overall)
+    cap_drop:
+      - ALL
+    cap_add:
+      - MKNOD
+      - SYS_ADMIN
+      - SYS_CHROOT
+      - CHOWN
+      - FOWNER
+
+    security_opt:
+      - no-new-privileges:true
+
