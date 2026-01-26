@@ -7,7 +7,7 @@ on:
 jobs:
   yamllint:
     runs-on: ubuntu-latest
-    container: cytopia/yamllint:1.32
+    container: cytopia/yamllint:latest
     steps:
       - uses: actions/checkout@v4
       - name: Run yamllint
@@ -15,7 +15,7 @@ jobs:
 
   compose-validate:
     runs-on: ubuntu-latest
-    container: docker/compose:2.27.0
+    container: docker/compose:latest
     steps:
       - uses: actions/checkout@v4
       - name: Validate compose files
@@ -29,12 +29,14 @@ jobs:
 
   systemd-verify:
     runs-on: ubuntu-latest
-    container: ghcr.io/systemd/systemd:latest
+    container: ubuntu:24.04
     steps:
       - uses: actions/checkout@v4
       - name: Verify systemd units
         run: |
           set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends systemd
           systemd-analyze --version
           systemd-analyze verify systemd/*.service systemd/*.socket
 
