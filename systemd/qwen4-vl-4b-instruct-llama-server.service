@@ -1,4 +1,3 @@
-koopa-crypt:~:% cat podman-compose/systemd/nemotron-llama-server.service 
 [Unit]
 Description=llama.cpp server (Nemotron-3-Nano)
 After=network-online.target
