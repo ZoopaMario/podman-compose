@@ -22,12 +22,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install podman-compose
+        shell: bash
         run: |
           set -euo pipefail
           apt-get update
           apt-get install -y --no-install-recommends podman python3-pip
           pip install --no-cache-dir podman-compose
       - name: Validate compose files
+        shell: bash
         run: |
           set -euo pipefail
           failed=0
