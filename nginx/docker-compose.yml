@@ -1,3 +1,4 @@
+---
 services:
   nginx:
     image: nginx:1-alpine
@@ -20,4 +21,3 @@ networks:
   proxy:
     external: true
     name: proxy
-

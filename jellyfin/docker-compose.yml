@@ -1,3 +1,4 @@
+---
 services:
   jellyfin:
     image: jellyfin/jellyfin:10
@@ -7,8 +8,7 @@ services:
       - "8920:8920"        # HTTPS (if you use it)
       - "7359:7359/udp"    # Client discovery
       - "1900:1900/udp"    # DLNA (SSDP)
-
-#    user: "1000:1000"
+    # user: "1000:1000"
 
     # Persistent config + cache on NFS, media bind-mounted read/write.
     volumes:
@@ -30,4 +30,3 @@ services:
     # the container is effectively "on the host" already, so we can drop this.
     # extra_hosts:
     #   - "host.docker.internal:host-gateway"
-

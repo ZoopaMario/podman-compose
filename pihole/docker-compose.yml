@@ -1,3 +1,4 @@
+---
 services:
   unbound:
     image: klutchell/unbound:main
@@ -35,7 +36,7 @@ services:
       FTLCONF_dns_dnssec: 'false'
       FTLCONF_dns_rateLimit_count: '1000'
       FTLCONF_dns_rateLimit_interval: '60'
-      FTLCONF_misc_nice: '0'  
+      FTLCONF_misc_nice: '0'
 
       FTLCONF_ntp_ipv4_active: false
       FTLCONF_ntp_ipv6_active: false
@@ -52,4 +53,3 @@ services:
 
 volumes:
   unbound_state:
-

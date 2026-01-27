@@ -1,3 +1,4 @@
+---
 version: "3.8"
 
 services:
@@ -11,7 +12,7 @@ services:
       - CPAD_MAIN_DOMAIN=https://drive.${CPAD_DOMAIN}
       - CPAD_SANDBOX_DOMAIN=https://sandbox-drive.${CPAD_DOMAIN}
       - CPAD_CONF=/cryptpad/config/config.js
-        #- CPAD_INSTALL_ONLYOFFICE=yes
+      # - CPAD_INSTALL_ONLYOFFICE=yes
 
     # Rootless-safe mode: container "root" maps to the host user (orangepi).
     # This is the model that reliably works with NFS bind mounts under rootless Podman.
@@ -51,4 +52,3 @@ services:
 networks:
   proxy:
     external: true
-
