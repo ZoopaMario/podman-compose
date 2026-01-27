@@ -18,11 +18,15 @@ jobs:
 
   compose-validate:
     runs-on: ubuntu-latest
-    container: python:3.11-slim
+    container: ubuntu:24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install podman-compose
-        run: pip install --no-cache-dir podman-compose
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends podman python3-pip
+          pip install --no-cache-dir podman-compose
       - name: Validate compose files
         run: |
           set -euo pipefail
