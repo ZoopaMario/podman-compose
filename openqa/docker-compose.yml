@@ -8,9 +8,9 @@ services:
     environment:
       POSTGRES_DB: openqa
       POSTGRES_USER: ${DB_USER:-geekotest}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change_me}
     volumes:
-      - ${DATA_PATH}/postgres:/var/lib/postgresql/data
+      - ${DATA_PATH:-/mnt/data}/postgres:/var/lib/postgresql/data
     restart: unless-stopped
     networks:
       - openqa
@@ -29,9 +29,9 @@ services:
       - "${WEBUI_PORT:-8555}:80"
       - "${WEBUI_HTTPS_PORT:-8444}:443"
     volumes:
-      - ${DATA_PATH}/openqa:/var/lib/openqa
-      - ${CONFIG_PATH}/openqa.ini:/data/conf/openqa.ini:z
-      - ${CONFIG_PATH}/database.ini:/data/conf/database.ini:z
+      - ${DATA_PATH:-/mnt/data}/openqa:/var/lib/openqa
+      - ${CONFIG_PATH:-/mnt/data}/openqa.ini:/data/conf/openqa.ini:z
+      - ${CONFIG_PATH:-/mnt/data}/database.ini:/data/conf/database.ini:z
     environment:
       - OPENQA_HOST=openqa-webui
     restart: unless-stopped
@@ -46,9 +46,9 @@ services:
     devices:
       - /dev/kvm:/dev/kvm
     volumes:
-      - ${DATA_PATH}/openqa:/var/lib/openqa
-      - ${CONFIG_PATH}/workers.ini:/data/conf/workers.ini:z
-      - ${CONFIG_PATH}/client.conf:/data/conf/client.conf:z
+      - ${DATA_PATH:-/mnt/data}/openqa:/var/lib/openqa
+      - ${CONFIG_PATH:-/mnt/data}/workers.ini:/data/conf/workers.ini:z
+      - ${CONFIG_PATH:-/mnt/data}/client.conf:/data/conf/client.conf:z
     environment:
       - OPENQA_HOST=openqa-webui
     restart: unless-stopped

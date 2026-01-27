@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: litellm
       POSTGRES_USER: ${DB_USER:-llmproxy}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-replaceme}
       POSTGRES_HOST_AUTH_METHOD: scram-sha-256
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
     healthcheck:
@@ -28,20 +28,19 @@ services:
       OLLAMA_API_BASE: ${OLLAMA_API_BASE:-http://127.0.0.1:11434}
 
       # Proxy credentials
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
-      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-replaceme}
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:-replaceme}
 
       # UI login
-      UI_USERNAME: ${UI_USERNAME}
-      UI_PASSWORD: ${UI_PASSWORD}
+      UI_USERNAME: ${UI_USERNAME:-admin}
+      UI_PASSWORD: ${UI_PASSWORD:-replaceme}
 
       # DB connection
-      DATABASE_URL: "postgresql://${DB_USER:-llmproxy}:${POSTGRES_PASSWORD}@db:5432/litellm?sslmode=disable"
+      DATABASE_URL: "postgresql://${DB_USER:-llmproxy}:${POSTGRES_PASSWORD:-replaceme}@db:5432/litellm?sslmode=disable"
 
       STORE_MODEL_IN_DB: "True"
     depends_on:
-      db:
-        condition: service_healthy
+      - db
     restart: unless-stopped
 
 volumes:

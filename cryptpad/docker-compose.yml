@@ -9,8 +9,8 @@ services:
 
     environment:
       - HOME=/cryptpad
-      - CPAD_MAIN_DOMAIN=https://drive.${CPAD_DOMAIN}
-      - CPAD_SANDBOX_DOMAIN=https://sandbox-drive.${CPAD_DOMAIN}
+      - CPAD_MAIN_DOMAIN=https://drive.${CPAD_DOMAIN:-example.invalid}
+      - CPAD_SANDBOX_DOMAIN=https://sandbox-drive.${CPAD_DOMAIN:-example.invalid}
       - CPAD_CONF=/cryptpad/config/config.js
       # - CPAD_INSTALL_ONLYOFFICE=yes
 
