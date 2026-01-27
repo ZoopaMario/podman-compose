@@ -3,6 +3,8 @@ name: ci
 
 on:
   push:
+    branches:
+      - main
   pull_request:
 
 jobs:
@@ -16,17 +18,28 @@ jobs:
 
   compose-validate:
     runs-on: ubuntu-latest
-    container: docker/compose:latest
+    container: ubuntu:24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Validate compose files
+      - name: Install podman-compose
+        shell: bash
         run: |
-          set -eu
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends podman podman-compose
+      - name: Validate compose files
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
           files=$(find . -name docker-compose.yml -print)
           for file in $files; do
             echo "Validating $file"
-            docker-compose -f "$file" config --quiet
+            if ! podman-compose -f "$file" config >/dev/null; then
+              failed=1
+            fi
           done
+          exit "$failed"
 
   systemd-verify:
     runs-on: ubuntu-latest
