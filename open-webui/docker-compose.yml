@@ -1,4 +1,5 @@
-version: '3.9'
+---
+version: '3.8'
 services:
   postgres:
     image: postgres:16
@@ -9,7 +10,7 @@ services:
     user: "0"                                # run as root inside container
     environment:
       POSTGRES_USER: ${DB_USER:-openwebui}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
       POSTGRES_DB: openwebui
       TZ: Europe/Berlin
     shm_size: "512m"
@@ -42,7 +43,7 @@ services:
     environment:
       QDRANT__LOG_LEVEL: INFO
       QDRANT__STORAGE__STORAGE_PATH: /qdrant/storage
-      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
     volumes:
       - ${DATA_ROOT:-/mnt/data}/open-webui/qdrant:/qdrant/storage
 
@@ -71,7 +72,7 @@ services:
       MODELS_CACHE_TTL: "300"
       CHAT_RESPONSE_STREAM_DELTA_CHUNK_SIZE: "12"
       ENABLE_REALTIME_CHAT_SAVE: "false"
-      DATABASE_URL: postgresql://${DB_USER:-openwebui}:${POSTGRES_PASSWORD}@postgres:5432/openwebui
+      DATABASE_URL: postgresql://${DB_USER:-openwebui}:${POSTGRES_PASSWORD:-change_me}@postgres:5432/openwebui
       DATABASE_POOL_SIZE: "10"
       DATABASE_POOL_MAX_OVERFLOW: "20"
       DATABASE_POOL_TIMEOUT: "30"
@@ -83,10 +84,10 @@ services:
       REDIS_KEY_PREFIX: open-webui
       VECTOR_DB: qdrant
       QDRANT_URI: http://qdrant:6333
-      QDRANT_API_KEY: ${QDRANT_API_KEY}
-      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL}
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
     ports:
       - "${OPEN_WEBUI_PORT:-8080}:8080"
     volumes:
@@ -98,12 +99,12 @@ services:
     networks: [owui]
     environment:
       TZ: Europe/Berlin
-      MCPO_API_KEY: ${MCPO_API_KEY}
+      MCPO_API_KEY: ${MCPO_API_KEY:-}
     volumes:
       - ${DATA_ROOT:-/mnt/data}/open-webui/mcpo:/config
     command: >
       --port 8000
-      --api-key ${MCPO_API_KEY}
+      --api-key ${MCPO_API_KEY:-}
       --config /config/mcpo-config.json
     ports:
       - "${MCPO_PORT:-8000}:8000"
@@ -114,4 +115,3 @@ networks:
 
 volumes:
   owui-postgres-data:
-

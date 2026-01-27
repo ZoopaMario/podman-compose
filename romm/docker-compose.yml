@@ -1,3 +1,4 @@
+---
 version: "3"
 
 volumes:
@@ -81,4 +82,3 @@ services:
       # IMPORTANT: no start_interval – Podman/buildah don't support it yet
       # and you'll get errors like “can't set healthcheck.start_interval
       # as feature require Docker Engine v25 or later”. :contentReference[oaicite:2]{index=2}
-

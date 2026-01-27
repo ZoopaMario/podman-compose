@@ -1,3 +1,4 @@
+---
 services:
   shlink:
     image: shlinkio/shlink:stable
@@ -33,7 +34,7 @@ services:
       PGID: "100"
 
       TZ: "Europe/Berlin"
-      
+
       MYSQL_DATABASE: "shlink_db"
       MYSQL_USER: "${DB_USER:-shlink_user}"
       MYSQL_PASSWORD: "${MYSQL_PASSWORD}"

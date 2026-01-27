@@ -1,3 +1,4 @@
+---
 services:
   server:
     image: codeberg.org/forgejo/forgejo:13-rootless
@@ -36,4 +37,3 @@ services:
     restart: unless-stopped
     command: >
       /bin/sh -c "sleep 5; forgejo-runner daemon"
-

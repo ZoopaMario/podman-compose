@@ -1,0 +1,66 @@
+---
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  yamllint:
+    runs-on: ubuntu-latest
+    container: cytopia/yamllint:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run yamllint
+        run: yamllint -c .yamllint.yaml .
+
+  compose-validate:
+    runs-on: ubuntu-latest
+    container: docker/compose:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate compose files
+        run: |
+          set -eu
+          files=$(find . -name docker-compose.yml -print)
+          for file in $files; do
+            echo "Validating $file"
+            docker-compose -f "$file" config --quiet
+          done
+
+  systemd-verify:
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify systemd units
+        run: |
+          set -eu
+          apt-get update
+          apt-get install -y --no-install-recommends systemd
+          install -d /usr/bin /github/home/llama.cpp/build/bin /etc/systemd/system
+          printf '#!/bin/sh\nexit 0\n' > /usr/bin/podman-compose
+          chmod +x /usr/bin/podman-compose
+          printf '#!/bin/sh\nexit 0\n' > /github/home/llama.cpp/build/bin/llama-server
+          chmod +x /github/home/llama.cpp/build/bin/llama-server
+          cat <<'EOF' > /etc/systemd/system/docker.service
+          [Unit]
+          Description=Stub Docker Service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/true
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          systemd-analyze --version
+          systemd-analyze verify systemd/*.service systemd/*.socket
+
+  env-coverage:
+    runs-on: ubuntu-latest
+    container: python:3.11-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check .env.example coverage
+        run: python scripts/check_env_example_coverage.py

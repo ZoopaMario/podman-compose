@@ -1,3 +1,4 @@
+---
 services:
   duplicati:
     image: duplicati/duplicati:stable
@@ -34,4 +35,3 @@ services:
 
       # Optional: scripts (if you later want Duplicati run-scripts)
       - ${LOCAL_ROOT:-/srv}/duplicati/scripts:/scripts:ro
-
