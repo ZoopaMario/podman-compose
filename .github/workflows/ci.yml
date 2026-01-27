@@ -38,6 +38,22 @@ jobs:
           set -eu
           apt-get update
           apt-get install -y --no-install-recommends systemd
+          install -d /usr/bin /github/home/llama.cpp/build/bin /etc/systemd/system
+          printf '#!/bin/sh\nexit 0\n' > /usr/bin/podman-compose
+          chmod +x /usr/bin/podman-compose
+          printf '#!/bin/sh\nexit 0\n' > /github/home/llama.cpp/build/bin/llama-server
+          chmod +x /github/home/llama.cpp/build/bin/llama-server
+          cat <<'EOF' > /etc/systemd/system/docker.service
+          [Unit]
+          Description=Stub Docker Service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/bin/true
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
           systemd-analyze --version
           systemd-analyze verify systemd/*.service systemd/*.socket
 

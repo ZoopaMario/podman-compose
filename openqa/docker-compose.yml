@@ -24,8 +24,7 @@ services:
     image: registry.opensuse.org/devel/openqa/containers15.6/openqa_webui:latest
     container_name: openqa-webui
     depends_on:
-      postgres:
-        condition: service_healthy
+      - postgres
     ports:
       - "${WEBUI_PORT:-8555}:80"
       - "${WEBUI_HTTPS_PORT:-8444}:443"
