@@ -1,0 +1,60 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: openqa-${INSTANCE:-prod}-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-openqa}
+      POSTGRES_USER: ${DB_USER:-openqa_prod}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change_me}
+    volumes:
+      - /srv/openqa/prod/postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+    networks: [openqa-int]
+
+  openqa-webui:
+    image: registry.opensuse.org/devel/openqa/containers15.6/openqa_webui:latest
+    container_name: openqa-${INSTANCE:-prod}-webui
+    depends_on: [postgres]
+    ports:
+      - "127.0.0.1:${WEBUI_PORT:-8555}:80"
+    volumes:
+      - /srv/openqa/prod/testresults:/data/testresults
+      - /srv/openqa/prod/images:/data/images
+
+      - /srv/openqa/prod/share:/var/lib/openqa/share
+      - /srv/openqa/prod/db:/var/lib/openqa/db
+      - /srv/openqa/prod/pool:/var/lib/openqa/pool
+      - /srv/openqa/prod/config/etc-openqa:/etc/openqa:rw
+      - /etc/machine-id:/var/lib/dbus/machine-id:ro
+    environment:
+      - MOJO_REVERSE_PROXY=1
+    restart: unless-stopped
+    networks:
+      - openqa-int
+      - proxy
+
+  openqa-worker:
+    image: registry.opensuse.org/devel/openqa/containers15.6/openqa_worker:latest
+    container_name: openqa-${INSTANCE:-prod}-worker
+    depends_on: [openqa-webui]
+    devices:
+      - /dev/kvm:/dev/kvm
+    shm_size: "1g"
+    volumes:
+      - /srv/openqa/prod/share:/var/lib/openqa/share
+      - /srv/openqa/prod/pool:/var/lib/openqa/pool
+      - /srv/openqa/prod/config/worker/workers.ini:/etc/openqa/workers.ini:ro
+      - /srv/openqa/prod/config/worker/client.conf:/etc/openqa/client.conf:ro
+      - /etc/machine-id:/var/lib/dbus/machine-id:ro
+    restart: unless-stopped
+    networks: [openqa-int]
+
+networks:
+  openqa-int:
+    driver: bridge
+  proxy:
+    external: true
+    name: proxy
+

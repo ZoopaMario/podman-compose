@@ -17,6 +17,7 @@ services:
       - /run/user/1000/ondemand:/sockets:ro
     networks:
       - proxy
+
 networks:
   proxy:
     external: true
