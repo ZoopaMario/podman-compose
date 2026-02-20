@@ -1,0 +1,82 @@
+---
+version: "3.8"
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.0-pg16
+    container_name: parabol-postgres
+    env_file:
+      - .env
+    volumes:
+      - /srv/parabol/postgres/pgdata:/var/lib/postgresql/data:Z
+    healthcheck:
+      # NICHT $VARS benutzen (podman-compose expanded das gern falsch)
+      test: ["CMD-SHELL", "pg_isready -U pgparaboladmin -d parabol-saas"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    networks: [parabol]
+
+  valkey:
+    image: valkey/valkey:9.0-alpine
+    container_name: parabol-valkey
+    tmpfs: [/data]
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    networks: [parabol]
+
+  # OPTIONAL – kannst du erstmal weglassen, wenn du nur Parabol ans Laufen kriegen willst
+  tgi-proxy:
+    image: python:3.12-slim
+    container_name: parabol-tgi-proxy
+    env_file:
+      - .env
+    environment:
+      - LITELLM_BASE_URL=${LITELLM_BASE_URL:-http://host.containers.internal:4000/v1}
+      - LITELLM_API_KEY=${LITELLM_API_KEY}
+      - LITELLM_MODEL=${LITELLM_MODEL:-parabol-main}
+      - DEBUG_TRIPWIRE=${DEBUG_TRIPWIRE:-0}
+      - ENFORCE_GROUNDING=${ENFORCE_GROUNDING:-1}
+      - GROUNDING_FORCE_INSUFFICIENT=${GROUNDING_FORCE_INSUFFICIENT:-1}
+      - DEBUG_LAST_USER_EXCERPT=${DEBUG_LAST_USER_EXCERPT:-1}
+
+    volumes:
+      - /mnt/data/parabol/config/tgi_litellm_proxy.py:/app/tgi_litellm_proxy.py:ro
+    working_dir: /app
+    command:
+      - bash
+      - -lc
+      - |
+        pip install --no-cache-dir fastapi uvicorn httpx &&
+        uvicorn tgi_litellm_proxy:app --host 0.0.0.0 --port 8080 --access-log --log-level debug
+    ports:
+      - "3050:8080"
+    restart: unless-stopped
+    networks: [parabol]
+
+  web:
+    image: localhost/parabol:v12.3.0-sharp
+    # wenn du dein sharp-image wirklich brauchst, nimm:
+    # image: localhost/parabol:v12.3.0-sharp
+    container_name: parabol-web
+    env_file:
+      - .env
+    # preDeploy + web in EINEM Container => kein "predeploy war kaputt, web läuft trotzdem"
+    command: ["bash", "-lc", "node dist/preDeploy.js && node dist/web.js"]
+    ports:
+      - "0.0.0.0:13500:3000"
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - valkey
+    networks: [parabol]
+
+networks:
+  parabol:
+    name: parabol
+    driver: bridge

@@ -1,0 +1,20 @@
+FROM parabol:v12.3.0
+
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+USER node
+
+# 1) sharp in clean dir installieren (vermeidet npm/lock/workspace-Quirks)
+WORKDIR /tmp/sharp
+RUN npm init -y \
+ && npm install --omit=dev --no-audit --no-fund sharp
+
+# 2) in Parabol-Workdir rein-mischen
+WORKDIR /home/node/parabol
+RUN mkdir -p node_modules \
+ && cp -a /tmp/sharp/node_modules/* ./node_modules/ \
+ && rm -rf /tmp/sharp
+
