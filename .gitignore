@@ -1,0 +1,24 @@
+# env / secrets
+.env
+*.env
+*stack.env
+*.secret
+secrets/
+.envrc
+
+# podman / compose runtime cruft
+*.pid
+*.cid
+*.log
+podman-compose.override.yml
+
+# editor stuff
+.vscode/
+.idea/
+*~
+
+# sub repositories
+./monthly
+
+# OpenQA runtime config (use openqa/prod/config.example as tracked templates)
+openqa/prod/config/
