@@ -20,6 +20,9 @@ services:
       - TZ=Europe/Berlin
 
     volumes:
+      # Local root source data (for app configs under /srv, mounted read-only)
+      - ${LOCAL_ROOT:-/srv}:${LOCAL_ROOT:-/srv}:ro
+
       # Duplicati state (local disk recommended to avoid sqlite-on-NFS weirdness)
       - ${LOCAL_ROOT:-/srv}/duplicati/data:/data
 
