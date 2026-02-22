@@ -7,6 +7,15 @@ LOG_DIR="${BASE_DIR}/logs"
 
 DUPLICATI_CONTAINER="${DUPLICATI_CONTAINER:-duplicati}"
 
+# Rootful-by-default; override for rootless testing if needed.
+# Example: PODMAN_CMD="podman"
+PODMAN_CMD="${PODMAN_CMD:-sudo -n podman}"
+read -r -a PODMAN_CMD_ARR <<< "${PODMAN_CMD}"
+
+# Stack containers remain rootless; use a separate command for stack checks.
+# Example: PODMAN_STACK_CMD="podman"
+PODMAN_STACK_CMD="${PODMAN_STACK_CMD:-podman}"
+read -r -a PODMAN_STACK_CMD_ARR <<< "${PODMAN_STACK_CMD}"
 # "run" should enqueue quickly; kill client if it blocks.
 DUPLICATI_RUN_TIMEOUT="${DUPLICATI_RUN_TIMEOUT:-25}"
 
@@ -34,6 +43,8 @@ Environment:
   DUPLICATI_CONTAINER=duplicati
   DUPLICATI_RUN_TIMEOUT=25
   DUPLICATI_WAIT_TIMEOUT=21600
+  PODMAN_CMD="sudo -n podman"
+  PODMAN_STACK_CMD="podman"
 USAGE
 }
 
@@ -49,10 +60,10 @@ list_stacks() {
   (cd "${STACKS_DIR}" && ls -1 *.sh 2>/dev/null | sed 's/\.sh$//' || true)
 }
 
-DUPLICATI_CMD=(podman exec "${DUPLICATI_CONTAINER}" duplicati-server-util)
+DUPLICATI_CMD=("${PODMAN_CMD_ARR[@]}" exec "${DUPLICATI_CONTAINER}" duplicati-server-util)
 
 require_duplicati() {
-  podman ps --format '{{.Names}}' | grep -qx "${DUPLICATI_CONTAINER}" \
+  "${PODMAN_CMD_ARR[@]}" ps --format '{{.Names}}' | grep -qx "${DUPLICATI_CONTAINER}" \
     || die "Duplicati container '${DUPLICATI_CONTAINER}' is not running."
 
   "${DUPLICATI_CMD[@]}" list-backups >/dev/null 2>&1 \
@@ -88,7 +99,7 @@ wait_stopped() {
   local start now
   start="$(date +%s)"
   while true; do
-    if ! podman ps --filter "label=io.podman.compose.project=${project}" --format '{{.ID}}' | grep -q .; then
+    if ! "${PODMAN_STACK_CMD_ARR[@]}" ps --filter "label=io.podman.compose.project=${project}" --format '{{.ID}}' | grep -q .; then
       return 0
     fi
     now="$(date +%s)"
@@ -105,7 +116,7 @@ wait_started() {
   local start now
   start="$(date +%s)"
   while true; do
-    if podman ps --filter "label=io.podman.compose.project=${project}" --format '{{.ID}}' | grep -q .; then
+    if "${PODMAN_STACK_CMD_ARR[@]}" ps --filter "label=io.podman.compose.project=${project}" --format '{{.ID}}' | grep -q .; then
       return 0
     fi
     now="$(date +%s)"
@@ -114,6 +125,11 @@ wait_started() {
     fi
     sleep 2
   done
+}
+
+stack_containers_running() {
+  local project="$1"
+  "${PODMAN_STACK_CMD_ARR[@]}" ps --filter "label=io.podman.compose.project=${project}" --format '{{.ID}}' | grep -q .
 }
 
 supports_run_wait() {
@@ -178,6 +194,7 @@ wait_for_backup_done() {
   local timeout="${2:-$DUPLICATI_WAIT_TIMEOUT}"
   local start now
   local last_print=0
+  local unknown_status_seen=0
 
   start="$(date +%s)"
   while true; do
@@ -191,8 +208,11 @@ wait_for_backup_done() {
     if status_has_active_task "$s"; then
       :
     else
-      # Unknown format: if it doesn't claim idle and doesn't show active, assume done.
-      return 0
+      # Unknown format: be conservative and keep waiting until timeout.
+      unknown_status_seen=$((unknown_status_seen + 1))
+      if (( unknown_status_seen == 1 || unknown_status_seen % 12 == 0 )); then
+        log "WARNING: Could not parse Duplicati status output clearly; waiting conservatively."
+      fi
     fi
 
     now="$(date +%s)"
@@ -321,10 +341,14 @@ do_one_stack_backup() {
 
   # Capture prior state
   local unit_was_active="no"
+  local containers_were_running="no"
   local ondemand_socket_was_active="no"
 
   if unit_is_active "${UNIT}"; then
     unit_was_active="yes"
+  fi
+  if stack_containers_running "${PROJECT_LABEL}"; then
+    containers_were_running="yes"
   fi
 
   if [[ "${FREEZE_ONDEMAND}" == "yes" && -n "${ONDEMAND_SOCKET}" ]]; then
@@ -345,11 +369,11 @@ do_one_stack_backup() {
 
     # Restore stack only if policy demands it
     if [[ "${started_again}" != "yes" ]]; then
-      if [[ "${RESTORE_POLICY}" == "always" || "${unit_was_active}" == "yes" ]]; then
+      if [[ "${RESTORE_POLICY}" == "always" || "${containers_were_running}" == "yes" ]]; then
         log "Cleanup: attempting to start '${UNIT}' (best-effort)"
         unit_start_best_effort "${UNIT}"
       else
-        log "Cleanup: leaving '${UNIT}' stopped (it was inactive before backup)"
+        log "Cleanup: leaving '${UNIT}' stopped (containers were not running before backup)"
       fi
     fi
   }
@@ -384,15 +408,15 @@ do_one_stack_backup() {
 
   # Restore the stack according to policy
   stack_pre_start
-  if [[ "${RESTORE_POLICY}" == "always" || "${unit_was_active}" == "yes" ]]; then
-    log "Starting unit: ${UNIT} (restore policy=${RESTORE_POLICY}, was_active=${unit_was_active})"
+  if [[ "${RESTORE_POLICY}" == "always" || "${containers_were_running}" == "yes" ]]; then
+    log "Starting unit: ${UNIT} (restore policy=${RESTORE_POLICY}, containers_running=${containers_were_running})"
     systemctl --user start "${UNIT}"
 
     if ! wait_started "${PROJECT_LABEL}" "${START_TIMEOUT}"; then
       log "WARNING: No running containers detected for '${PROJECT_LABEL}' after ${START_TIMEOUT}s."
     fi
   else
-    log "Leaving unit stopped: ${UNIT} (it was inactive before backup)"
+    log "Leaving unit stopped: ${UNIT} (containers were not running before backup)"
   fi
   stack_post_start
 
@@ -458,4 +482,3 @@ main() {
 }
 
 main "$@"
-

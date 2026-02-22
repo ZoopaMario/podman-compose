@@ -1,6 +1,7 @@
 # Podman Stacks
 
 Rootless `podman-compose` stacks managed by systemd user services.
+Exception: the `duplicati` stack runs **rootful** via sudo; all other stacks remain rootless.
 
 ## Prerequisites
 

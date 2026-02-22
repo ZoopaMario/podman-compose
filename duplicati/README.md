@@ -1,273 +1,173 @@
-# Duplicati Per-Stack Backup Orchestrator (rootless Podman + systemd --user)
+# Duplicati Per-Stack Backup Orchestrator
 
-This directory contains a lightweight backup orchestration layer for **koopa-crypt**.
+Per-stack backup orchestration for **rootful Duplicati only** (via sudo) with
+rootless Podman stacks managed by `systemd --user`.
+Each stack has its own config (`stacks/<stack>.sh`) and one or more Duplicati jobs.
 
-It is designed for a **rootless Podman** environment where application stacks are managed as **systemd user services** (`*-stack.service`) and actual backup jobs are executed by **Duplicati** inside a container.
+## Concept
 
-The key goals are:
+For each selected stack, `bin/backup` does:
+1. Optionally freeze Zoopa on-demand socket activation.
+2. Stop the stack unit (for example `nextcloud-stack.service`).
+3. Wait until containers with label `io.podman.compose.project=<project>` are stopped.
+4. Trigger configured Duplicati job(s).
+5. Wait until Duplicati reports `Active task: None|Empty` (not just `Server state: Running`).
+6. Restore stack state based on `RESTORE_POLICY`.
+7. Optionally restore on-demand socket state.
+8. Run optional verification hook(s), write logs.
 
-- **Minimal downtime**: each stack is stopped only for the duration of *its own* backup job(s).
-- **Safe**: automatic restore of state even if a backup fails mid-run.
-- **Maintainable**: one config file per stack, with simple hook functions for stack-specific actions.
-- **Works with Duplicati quirks**: we enqueue jobs with a short timeout and then wait for completion by polling `duplicati-server-util status`.
-
----
+Safety properties:
+- Lock file prevents concurrent backup runs.
+- Cleanup trap restores service/socket state after failures (best-effort).
+- Default restore behavior keeps previously-stopped stacks stopped.
 
 ## Layout
 
-```
-
-~/podman-compose/duplicati/
-├─ bin/
-│  └─ backup                # main entry point (run manually or from timer)
+```text
+duplicati/
+├─ bin/backup
 ├─ stacks/
-│  ├─ _template.sh          # template for new stack config
-│  ├─ cryptpad.sh           # example on-demand stack config (freezes zoopa socket)
-│  └─ nextcloud.sh          # example stack config with maintenance hooks
-└─ logs/
-└─ backup-<stack>-YYYY-MM-DD.log
-
+│  ├─ cryptpad.sh
+│  └─ nextcloud.sh
+├─ logs/
+├─ docker-compose.yml
+└─ .env.example
 ```
 
----
+## Requirements
 
-## How it works (high level)
-
-For each stack (e.g. `cryptpad`):
-
-1. (Optional) **Freeze on-demand activation** (Zoopa socket) so the stack cannot be auto-started mid-backup.
-2. Stop the stack’s systemd user service (default `cryptpad-stack.service`).
-3. Wait until containers with label `io.podman.compose.project=cryptpad` are stopped (best-effort).
-4. Trigger one or more configured Duplicati job(s) via:
-
-```
-
-podman exec duplicati duplicati-server-util run "<job name>"
-
-```
-
-5. Wait for the backup to finish by polling:
-
-```
-
-podman exec duplicati duplicati-server-util status
-
-````
-
-It considers the backup complete when:
-- `Active task: None` (or `Active task: Empty`)
-
-**Important**: `Server state: Running` does *not* mean a backup is running.
-
-6. Restore the stack according to **RESTORE_POLICY**:
-   - `previous` (default): only start the unit again if it was active before backup
-   - `always`: always start the unit after backup
-
-7. (Optional) Un-freeze on-demand activation by restoring the Zoopa socket state.
-8. Run optional stack-specific verify steps.
-9. Write logs to `logs/backup-<stack>-YYYY-MM-DD.log`.
-
-A lockfile prevents concurrent runs (timer + manual).
-
----
-
-## Requirements / Assumptions
-
-- Rootless Podman is used.
-- Duplicati container is running and named `duplicati` (or override with env var).
-- Stacks are managed as systemd user units like `cryptpad-stack.service`.
-- Your containers are labeled by podman-compose with:
-  - `io.podman.compose.project=<stack>`
-- `/mnt/backup` is accessible (autofs/NFS). The script triggers autofs by touching the directory.
-
----
+- Rootless Podman stacks managed via `systemd --user`.
+- Rootful Duplicati container (default name: `duplicati`) started via sudo.
+- Sudoers rule allowing `podman-compose up/down` and `podman ps/exec` for Duplicati only.
+- Stacks managed via `systemd --user` units.
+- Podman compose labels present: `io.podman.compose.project=<stack>`.
+- `/mnt/backup` accessible (autofs/NFS is fine; script triggers it).
 
 ## Usage
 
-### List available stack configs
-
 ```bash
 ~/podman-compose/duplicati/bin/backup list
-````
-
-### Back up one stack now
-
-```bash
-~/podman-compose/duplicati/bin/backup cryptpad
-```
-
-### Back up multiple stacks now
-
-```bash
-~/podman-compose/duplicati/bin/backup cryptpad nextcloud vaultwarden
-```
-
-### Back up everything (sequentially, per stack)
-
-```bash
 ~/podman-compose/duplicati/bin/backup all
-```
-
-### Accept unit names too
-
-These are normalized:
-
-```bash
+~/podman-compose/duplicati/bin/backup cryptpad nextcloud
 ~/podman-compose/duplicati/bin/backup cryptpad-stack.service
 ```
 
----
+## Environment Variables
 
-## Environment variables
-
-The main script supports these variables:
-
-* `DUPLICATI_CONTAINER`
-  Name of the Duplicati container. Default: `duplicati`
-
-* `DUPLICATI_RUN_TIMEOUT`
-  Seconds to allow `duplicati-server-util run` to block. Default: `25`
-  Why: sometimes `run` can hang; we only need it to enqueue, then we poll status.
-
-* `DUPLICATI_WAIT_TIMEOUT`
-  Max seconds to wait for backup completion. Default: `21600` (6h)
+- `DUPLICATI_CONTAINER` (default `duplicati`)
+- `DUPLICATI_RUN_TIMEOUT` (default `25`) timeout for `duplicati-server-util run` enqueue call
+- `DUPLICATI_WAIT_TIMEOUT` (default `21600`) max wait for backup completion
+- `PODMAN_CMD` (default `sudo -n podman`) override podman invocation used for Duplicati only
+- `PODMAN_STACK_CMD` (default `podman`) podman invocation used to check rootless stack containers
 
 Example:
+```bash
+DUPLICATI_WAIT_TIMEOUT=28800 ~/podman-compose/duplicati/bin/backup nextcloud
+```
+
+Rootless override example (testing only):
+```bash
+PODMAN_CMD=podman ~/podman-compose/duplicati/bin/backup nextcloud
+```
+
+## Add a New Stack Backup Configuration
+
+### 1) Create/verify Duplicati jobs first
+
+- Create one or more jobs in Duplicati for that stack.
+- Use stable job names (or IDs) and set Duplicati schedule to manual/off if this orchestrator is the scheduler.
+- Validate each job from Duplicati UI or:
+  - `sudo podman exec duplicati duplicati-server-util list-backups`
+
+### 2) Create `stacks/<stack>.sh`
+
+Use this minimal template:
 
 ```bash
-DUPLICATI_WAIT_TIMEOUT=28800 ~/podman-compose/duplicati/bin/backup immich
+STACK_NAME="immich"
+UNIT="immich-stack.service"
+PROJECT_LABEL="immich"
+
+DUPLICATI_JOBS=(
+  "Immich -> Remote"
+)
+
+STOP_TIMEOUT=180
+START_TIMEOUT=180
+RESTORE_POLICY="previous"  # previous|always
+
+# Optional for Zoopa on-demand stacks:
+# FREEZE_ONDEMAND="yes"
+# ONDEMAND_SOCKET="zoopa-ondemand@immich.socket"
+# ONDEMAND_SERVICE="zoopa-ondemand@immich.service"
+
+# Optional hooks:
+# stack_pre_stop() { :; }
+# stack_post_stop() { :; }
+# stack_pre_backup() { :; }
+# stack_post_backup() { :; }
+# stack_pre_start() { :; }
+# stack_post_start() { :; }
+# stack_verify() { :; }
 ```
 
----
+Rules:
+- `UNIT` must be the exact systemd user unit name.
+- `PROJECT_LABEL` must match `io.podman.compose.project` label used by that stack.
+- `DUPLICATI_JOBS` must not be empty.
+- Prefer `RESTORE_POLICY="previous"` for on-demand/usually-idle stacks.
 
-## Per-stack configuration files
-
-Each stack has a file:
-
-```
-~/podman-compose/duplicati/stacks/<stack>.sh
-```
-
-### Required variables
-
-* `STACK_NAME`
-  Human-friendly name (usually same as file name)
-
-* `UNIT`
-  systemd user unit to stop/start (e.g. `cryptpad-stack.service`)
-
-* `PROJECT_LABEL`
-  podman-compose project label used for container detection (usually same as stack)
-
-* `DUPLICATI_JOBS=( ... )`
-  Array of Duplicati backup job names (or IDs) to run for this stack.
-
-### Optional variables
-
-* `STOP_TIMEOUT` (seconds)
-* `START_TIMEOUT` (seconds)
-
-### New: state restore policy
-
-* `RESTORE_POLICY`
-
-  * `previous` (default): restore the unit only if it was active before backup
-  * `always`: always start unit after backup
-
-This is especially important for **on-demand** apps: you typically want `previous`
-so a stack that was idle stays idle after backup.
-
-### New: on-demand freeze (Zoopa)
-
-If a stack is served via **Zoopa on-demand sockets**, leaving the socket enabled during a backup can
-cause the app to auto-start mid-backup if someone hits the URL.
-
-To prevent that, set:
-
-* `FREEZE_ONDEMAND="yes"`
-* `ONDEMAND_SOCKET="zoopa-ondemand@<app>.socket"`
-* `ONDEMAND_SERVICE="zoopa-ondemand@<app>.service"` (optional but recommended)
-
-The orchestrator will stop the socket (and service) before stopping the stack, and restore the socket state afterward.
-
-### Hooks (optional)
-
-You can define any of the following functions in a stack file:
-
-* `stack_pre_stop`
-* `stack_post_stop`
-* `stack_pre_backup`
-* `stack_post_backup`
-* `stack_pre_start`
-* `stack_post_start`
-* `stack_verify`
-
----
-
-## Example: CryptPad stack (on-demand)
-
-`stacks/cryptpad.sh` can freeze Zoopa socket activation:
+### 3) Validate unit and label mapping
 
 ```bash
-RESTORE_POLICY="previous"
-FREEZE_ONDEMAND="yes"
-ONDEMAND_SOCKET="zoopa-ondemand@cryptpad.socket"
-ONDEMAND_SERVICE="zoopa-ondemand@cryptpad.service"
+systemctl --user status immich-stack.service --no-pager
+podman ps --format '{{.Names}} {{.Labels}}' | grep io.podman.compose.project=immich
 ```
 
----
-
-## Example: Nextcloud with maintenance mode hooks
-
-`stacks/nextcloud.sh` can enable maintenance mode prior to stopping (best-effort),
-and disable it after starting:
+### 4) Dry run one stack and inspect logs
 
 ```bash
-NC_APP_CONTAINER="nextcloud-app"
-
-stack_pre_stop() {
-  podman exec -u www-data "${NC_APP_CONTAINER}" php occ maintenance:mode --on >/dev/null 2>&1 || true
-}
-
-stack_post_start() {
-  podman exec -u www-data "${NC_APP_CONTAINER}" php occ maintenance:mode --off >/dev/null 2>&1 || true
-}
+~/podman-compose/duplicati/bin/backup immich
+tail -n 100 ~/podman-compose/duplicati/logs/backup-immich-$(date +%F).log
 ```
 
----
+### 5) Add to scheduled runs
+
+If using `backup all`, new stack files are picked up automatically by `backup list/all`.
+
+## Hooks
+
+Optional hook functions in each stack file:
+- `stack_pre_stop`
+- `stack_post_stop`
+- `stack_pre_backup`
+- `stack_post_backup`
+- `stack_pre_start`
+- `stack_post_start`
+- `stack_verify`
+
+Use hooks for stack-specific consistency work, for example Nextcloud maintenance mode in `stacks/nextcloud.sh`.
 
 ## Logging
 
-Each run appends to:
+Per-stack append-only log path:
+`~/podman-compose/duplicati/logs/backup-<stack>-YYYY-MM-DD.log`
 
-```
-~/podman-compose/duplicati/logs/backup-<stack>-YYYY-MM-DD.log
-```
+## systemd Timer (Recommended)
 
----
-
-## systemd timer integration (recommended)
-
-Create:
-
-* `~/.config/systemd/user/duplicati-backup.service`
-* `~/.config/systemd/user/duplicati-backup.timer`
-
-Example service:
-
+`~/.config/systemd/user/duplicati-backup.service`:
 ```ini
 [Unit]
-Description=Duplicati per-stack backups (stop/run/wait/restore)
+Description=Duplicati per-stack backups
 Wants=podman.socket
 After=podman.socket
 
 [Service]
 Type=oneshot
-ExecStart=%h/podman-compose/duplicati/bin/backup all
+ExecStart=%h/podman-compose/duplicati/bin/backup cryptpad
 ```
 
-Example timer:
-
+`~/.config/systemd/user/duplicati-backup.timer`:
 ```ini
 [Unit]
 Description=Nightly Duplicati per-stack backups
@@ -281,70 +181,26 @@ WantedBy=timers.target
 ```
 
 Enable:
-
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now duplicati-backup.timer
 ```
 
-Inspect logs:
-
-```bash
-journalctl --user -u duplicati-backup.service -e --no-pager
-```
-
----
+To add more stacks later, append them to `ExecStart` after manual validation,
+for example: `.../bin/backup cryptpad nextcloud`.
 
 ## Troubleshooting
 
-### 1) “It waits forever”
+- Backup appears stuck:
+  - `sudo podman exec duplicati duplicati-server-util status`
+  - parser logic lives in `bin/backup` functions `active_task_value`, `status_is_idle`, `status_has_active_task`.
+- On-demand app auto-starts during backup:
+  - ensure `FREEZE_ONDEMAND="yes"` and valid `ONDEMAND_SOCKET`.
+- Stack start/stop does not affect containers:
+  - verify `UNIT` and `PROJECT_LABEL` correctness.
 
-Check what Duplicati reports:
+## Operational Notes
 
-```bash
-podman exec duplicati duplicati-server-util status
-```
-
-This orchestrator considers the backup complete when it sees:
-
-* `Active task: None` (or `Empty`)
-
-If Duplicati changes its output format, update the parser in `bin/backup`:
-
-* `active_task_value()`
-* `status_is_idle()`
-* `status_has_active_task()`
-
-### 2) “On-demand app started during backup anyway”
-
-Verify the stack config includes:
-
-* `FREEZE_ONDEMAND="yes"`
-* `ONDEMAND_SOCKET="zoopa-ondemand@<app>.socket"`
-
-Then check the socket state during backup:
-
-```bash
-systemctl --user status zoopa-ondemand@<app>.socket --no-pager
-```
-
-### 3) “Stop/start doesn’t stop containers”
-
-Check the unit name in the stack file:
-
-```bash
-systemctl --user status <stack>-stack.service --no-pager
-```
-
-Check the podman-compose label for that stack:
-
-```bash
-podman ps --format '{{.Names}} {{.Labels}}' | grep io.podman.compose.project
-```
-
----
-
-## Operational advice / gotchas
-
-* Keep Duplicati’s own configuration database on local disk if possible. (NFS + sqlite can be painful.)
-* Avoid scheduling backups inside Duplicati itself if you rely on this orchestrator; prefer manual-only jobs and one external timer.
+- Keep Duplicati state DB on local disk (avoid sqlite on NFS).
+- Do not run parallel schedulers for the same jobs.
+- Treat logs as operational data; they may contain backup names, container names, and timing details.
