@@ -14,6 +14,8 @@ services:
 
     expose:
       - "9980"
+    ports:
+      - "127.0.0.1:9980:9980"
 
     networks:
       - frontend
