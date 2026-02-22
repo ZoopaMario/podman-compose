@@ -40,9 +40,13 @@ jobs:
           set -eu
           apt-get update
           apt-get install -y --no-install-recommends systemd
-          install -d /usr/bin /github/home/llama.cpp/build/bin /etc/systemd/system
+          install -d /usr/bin /github/home/podman-compose/duplicati/bin /github/home/llama.cpp/build/bin /etc/systemd/system
           printf '#!/bin/sh\nexit 0\n' > /usr/bin/podman-compose
           chmod +x /usr/bin/podman-compose
+          printf '#!/bin/sh\nexit 0\n' > /usr/bin/sudo
+          chmod +x /usr/bin/sudo
+          printf '#!/bin/sh\nexit 0\n' > /github/home/podman-compose/duplicati/bin/backup
+          chmod +x /github/home/podman-compose/duplicati/bin/backup
           printf '#!/bin/sh\nexit 0\n' > /github/home/llama.cpp/build/bin/llama-server
           chmod +x /github/home/llama.cpp/build/bin/llama-server
           cat <<'EOF' > /etc/systemd/system/docker.service

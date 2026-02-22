@@ -5,6 +5,8 @@ services:
     container_name: duplicati
     restart: on-failure
 
+    # This stack is intended to run rootful via sudo (see systemd/duplicati-stack.service).
+    # Other stacks remain rootless; keep mount points consistent.
     # If this works with your podman-compose, it's safest (localhost only).
     # If it doesn't, switch to "8200:8200" and restrict via nginx/firewall.
     ports:
@@ -22,7 +24,7 @@ services:
       - ${LOCAL_ROOT:-/srv}/duplicati/data:/data
 
       # NFS data sources
-      - ${DATA_ROOT:-/mnt/data}:${DATA_ROOT:-/mnt/data}:ro
+      - ${DATA_ROOT:-/mnt/data}:${DATA_ROOT:-/mnt/data}
 
       # backup destination (fresh folder you already created under this)
       - /mnt/backup:/mnt/backup

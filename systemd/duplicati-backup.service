@@ -1,0 +1,12 @@
+[Unit]
+Description=Duplicati selected-stack backups
+Wants=podman.socket duplicati-stack.service
+After=podman.socket duplicati-stack.service
+
+[Service]
+Type=oneshot
+# Add stack names as explicit args as they are validated manually.
+ExecStart=%h/podman-compose/duplicati/bin/backup cryptpad
+
+[Install]
+WantedBy=default.target
