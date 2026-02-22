@@ -6,6 +6,45 @@ on:
   pull_request:
 
 jobs:
+  backup-static:
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: |
+          set -eu
+          apt-get update
+          apt-get install -y --no-install-recommends shellcheck
+      - name: Static backup script checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n duplicati/bin/backup duplicati/stacks/*.sh scripts/ci/*.sh scripts/tests/*.sh
+          shellcheck -S error duplicati/bin/backup scripts/ci/*.sh scripts/tests/*.sh
+          bash scripts/ci/validate_backup_stack_configs.sh
+
+  backup-contract:
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run backup contract tests
+        run: bash scripts/tests/backup_contract_tests.sh
+
+  backup-integration:
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install optional smoke-test dependencies
+        run: |
+          set -eu
+          apt-get update
+          apt-get install -y --no-install-recommends sqlite3
+      - name: Run backup integration tests (auto capability mode)
+        run: bash scripts/tests/backup_integration_tests.sh --mode=auto
+
   yamllint:
     runs-on: ubuntu-latest
     container: cytopia/yamllint:latest
