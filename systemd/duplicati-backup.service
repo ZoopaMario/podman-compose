@@ -5,8 +5,9 @@ After=podman.socket duplicati-stack.service
 
 [Service]
 Type=oneshot
+EnvironmentFile=%h/podman-compose/duplicati/.smtp.env
 # Add stack names as explicit args as they are validated manually.
-ExecStart=%h/podman-compose/duplicati/bin/backup cryptpad
+ExecStart=%h/podman-compose/duplicati/bin/backup media-books media-music media-musicvideos media-movies media-tvshows media-anime media-emulation media-podcasts cryptpad fmd-server homarr pihole nginx shlink duplicati vaultwarden nextcloud immich grafana litellm parabol open-webui jellyfin romm
 
 [Install]
 WantedBy=default.target

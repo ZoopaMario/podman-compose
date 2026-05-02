@@ -139,7 +139,13 @@ if [[ "${1:-}" == "exec" ]]; then
 
   case "${cmd}" in
     list-backups)
-      echo "${DUPLICATI_LIST_BACKUPS:-Test Job ID: 1}"
+      echo "${DUPLICATI_LIST_BACKUPS:-0: Test Job
+1: Vault Job
+2: A
+3: B
+4: Idle Job
+5: Crypt Job
+6: Bad}"
       ;;
     status)
       echo "${DUPLICATI_STATUS_OUTPUT:-Active task: None}"
