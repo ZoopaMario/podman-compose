@@ -22,6 +22,7 @@ services:
 
   litellm:
     image: "ghcr.io/berriai/litellm:main-stable"
+    command: ["--config", "/app/config.yaml"]
     ports:
       - "${LITELLM_PORT:-4000}:4000"
     environment:
@@ -31,6 +32,9 @@ services:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-replaceme}
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:-replaceme}
 
+      # Remote Provider API Key
+      REMOTE_PROVIDER_API_KEY: ${REMOTE_PROVIDER_API_KEY:-replaceme}
+
       # UI login
       UI_USERNAME: ${UI_USERNAME:-admin}
       UI_PASSWORD: ${UI_PASSWORD:-replaceme}
@@ -39,6 +43,8 @@ services:
       DATABASE_URL: "postgresql://${DB_USER:-llmproxy}:${POSTGRES_PASSWORD:-replaceme}@db:5432/litellm?sslmode=disable"
 
       STORE_MODEL_IN_DB: "True"
+    volumes:
+      - /mnt/data/litellm/config.yaml:/app/config.yaml:ro
     depends_on:
       - db
     restart: unless-stopped
