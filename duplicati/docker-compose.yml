@@ -35,6 +35,9 @@ services:
       # Rootless podman named volumes (DBs you kept off NFS, etc.)
       - ${HOST_HOME}/.local/share/containers/storage/volumes:/podman-volumes:ro
 
+      # Repository source (for backing up docker-compose.yml and .env templates)
+      - ${HOST_HOME}/podman-compose:${HOST_HOME}/podman-compose:ro
+
       # Optional: podman socket (we’ll use it in the “advanced” option below)
       - /run/user/1000/podman/podman.sock:/run/podman/podman.sock
 

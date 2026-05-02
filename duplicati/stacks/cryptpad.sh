@@ -5,6 +5,7 @@ PROJECT_LABEL="cryptpad"
 
 DUPLICATI_JOBS=(
   "Cryptpad -> Remote"
+  "Cryptpad -> Local"
 )
 
 # Optional tuning:

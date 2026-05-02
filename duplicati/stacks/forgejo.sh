@@ -1,14 +1,14 @@
-STACK_NAME="vaultwarden"
-UNIT="vaultwarden-stack.service"
-PROJECT_LABEL="vaultwarden"
+STACK_NAME="forgejo"
+UNIT="forgejo-stack.service"
+PROJECT_LABEL="forgejo"
 
 DUPLICATI_JOBS=(
-  "Vaultwarden -> Remote"
-  "Vaultwarden -> Local"
+  "Forgejo -> Remote"
+  "Forgejo -> Local"
 )
 
-STOP_TIMEOUT=180
-START_TIMEOUT=180
+STOP_TIMEOUT=240
+START_TIMEOUT=240
 RESTORE_POLICY="previous"
 
 stack_verify() {

@@ -143,8 +143,7 @@ extract_id_from_run_output() {
 get_backup_id_by_name() {
   local name="$1"
   "${DUPLICATI_CMD[@]}" list-backups 2>/dev/null \
-    | grep -F "${name}" \
-    | sed -n 's/.*ID[:= ]\{0,2\}\([0-9][0-9]*\).*/\1/p' \
+    | awk -F": " -v n="$name" '$2 == n {print $1}' \
     | head -n1
 }
 
@@ -239,8 +238,8 @@ run_job_and_wait() {
 
   if supports_run_wait; then
     log "Using server-util --wait"
-    timeout "${DUPLICATI_WAIT_TIMEOUT}" "${DUPLICATI_CMD[@]}" run "${job}" --wait
-    return 0
+    "${DUPLICATI_CMD[@]}" run "${job}" --wait
+    return $?
   fi
 
   set +e
@@ -294,6 +293,10 @@ load_stack() {
   ONDEMAND_SERVICE=""
   FREEZE_ONDEMAND="no"
 
+  # If "yes", do not stop the unit or wait for containers to stop.
+  # Use for "Hot" backups where the app must remain online (e.g. Pi-hole for DNS).
+  SKIP_STOP="no"
+
   stack_pre_stop()  { :; }
   stack_post_stop() { :; }
   stack_pre_backup(){ :; }
@@ -339,6 +342,15 @@ do_one_stack_backup() {
   # trigger autofs
   ls /mnt/backup >/dev/null 2>&1 || true
 
+  # Pre-flight: verify all jobs exist before stopping anything
+  log "Verifying Duplicati jobs exist..."
+  for job in "${DUPLICATI_JOBS[@]}"; do
+    if [[ -z "$(get_backup_id_by_name "${job}")" ]]; then
+      die "Duplicati job '${job}' NOT found. Check capitalization (e.g., 'Media' vs 'MEDIA') and spelling."
+    fi
+  done
+  log "All jobs verified."
+
   # Capture prior state
   local unit_was_active="no"
   local containers_were_running="no"
@@ -361,8 +373,8 @@ do_one_stack_backup() {
   local ondemand_restored="no"
 
   cleanup() {
-    # Restore on-demand socket if we froze it and it used to be active
-    if [[ "${FREEZE_ONDEMAND}" == "yes" && -n "${ONDEMAND_SOCKET}" && "${ondemand_socket_was_active}" == "yes" && "${ondemand_restored}" != "yes" ]]; then
+    # Restore on-demand socket if we froze it (always ensure it is active after backup)
+    if [[ "${FREEZE_ONDEMAND}" == "yes" && -n "${ONDEMAND_SOCKET}" && "${ondemand_restored}" != "yes" ]]; then
       log "Cleanup: restoring on-demand socket '${ONDEMAND_SOCKET}' (best-effort)"
       unit_start_best_effort "${ONDEMAND_SOCKET}"
     fi
@@ -390,15 +402,19 @@ do_one_stack_backup() {
     fi
   fi
 
-  stack_pre_stop
-  log "Stopping unit: ${UNIT}"
-  systemctl --user stop "${UNIT}"
+  if [[ "${SKIP_STOP}" == "yes" ]]; then
+    log "Hot backup: skipping unit stop for '${UNIT}'"
+  else
+    stack_pre_stop
+    log "Stopping unit: ${UNIT}"
+    systemctl --user stop "${UNIT}"
 
-  if ! wait_stopped "${PROJECT_LABEL}" "${STOP_TIMEOUT}"; then
-    log "WARNING: Containers for '${PROJECT_LABEL}' still appear running after ${STOP_TIMEOUT}s."
-    log "Continuing anyway (consistency may be reduced)."
+    if ! wait_stopped "${PROJECT_LABEL}" "${STOP_TIMEOUT}"; then
+      log "WARNING: Containers for '${PROJECT_LABEL}' still appear running after ${STOP_TIMEOUT}s."
+      log "Continuing anyway (consistency may be reduced)."
+    fi
+    stack_post_stop
   fi
-  stack_post_stop
 
   stack_pre_backup
   for job in "${DUPLICATI_JOBS[@]}"; do
@@ -407,21 +423,25 @@ do_one_stack_backup() {
   stack_post_backup
 
   # Restore the stack according to policy
-  stack_pre_start
-  if [[ "${RESTORE_POLICY}" == "always" || "${containers_were_running}" == "yes" ]]; then
-    log "Starting unit: ${UNIT} (restore policy=${RESTORE_POLICY}, containers_running=${containers_were_running})"
-    systemctl --user start "${UNIT}"
-
-    if ! wait_started "${PROJECT_LABEL}" "${START_TIMEOUT}"; then
-      log "WARNING: No running containers detected for '${PROJECT_LABEL}' after ${START_TIMEOUT}s."
-    fi
+  if [[ "${SKIP_STOP}" == "yes" ]]; then
+    log "Hot backup: skipping unit start for '${UNIT}'"
   else
-    log "Leaving unit stopped: ${UNIT} (containers were not running before backup)"
-  fi
-  stack_post_start
+    stack_pre_start
+    if [[ "${RESTORE_POLICY}" == "always" || "${containers_were_running}" == "yes" ]]; then
+      log "Starting unit: ${UNIT} (restore policy=${RESTORE_POLICY}, containers_running=${containers_were_running})"
+      systemctl --user start "${UNIT}"
 
-  # Un-freeze on-demand socket if it used to be active
-  if [[ "${FREEZE_ONDEMAND}" == "yes" && -n "${ONDEMAND_SOCKET}" && "${ondemand_socket_was_active}" == "yes" ]]; then
+      if ! wait_started "${PROJECT_LABEL}" "${START_TIMEOUT}"; then
+        log "WARNING: No running containers detected for '${PROJECT_LABEL}' after ${START_TIMEOUT}s."
+      fi
+    else
+      log "Leaving unit stopped: ${UNIT} (containers were not running before backup)"
+    fi
+    stack_post_start
+  fi
+
+  # Un-freeze on-demand socket (always ensure it is listening after backup)
+  if [[ "${FREEZE_ONDEMAND}" == "yes" && -n "${ONDEMAND_SOCKET}" ]]; then
     log "Restoring on-demand socket: starting '${ONDEMAND_SOCKET}'"
     unit_start_best_effort "${ONDEMAND_SOCKET}"
     ondemand_restored="yes"

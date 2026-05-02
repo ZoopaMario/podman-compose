@@ -1,0 +1,24 @@
+---
+version: '3.8'
+
+services:
+  standup-timer:
+    image: node:20-slim
+    container_name: standup-timer
+    working_dir: /app
+    volumes:
+      - /home/orangepi/standup-timer:/app:z
+    environment:
+      - PORT=${PORT:-3000}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - TZ=Europe/Berlin
+    ports:
+      - "127.0.0.1:${PORT_BINDING:-3005}:${PORT:-3000}"
+    networks:
+      - proxy
+    restart: unless-stopped
+    command: npm start
+
+networks:
+  proxy:
+    external: true

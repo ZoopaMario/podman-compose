@@ -4,6 +4,7 @@ PROJECT_LABEL="nextcloud"
 
 DUPLICATI_JOBS=(
   "Nextcloud -> Remote"
+  "Nextcloud -> Local"
 )
 
 # Adjust if your container name differs:
